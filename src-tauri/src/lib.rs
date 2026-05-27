@@ -6,7 +6,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External("http://110.42.239.85:5000".parse().unwrap()))
-                .title("印刷")
+                .title("芃麦印刷")
                 .inner_size(1200.0, 800.0)
                 .build()?;
             Ok(())

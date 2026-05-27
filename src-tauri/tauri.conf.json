@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "baidu-app",
+  "productName": "芃麦印刷",
   "version": "0.1.0",
-  "identifier": "com.dev.baidu-app",
+  "identifier": "com.dev.pengmaitw",
   "build": {
     "frontendDist": "../src"
   },
