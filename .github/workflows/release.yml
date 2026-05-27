@@ -1,8 +1,8 @@
 name: Release
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 jobs:
   release:
@@ -44,6 +44,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "baidu-app v__VERSION__"
-          releaseBody: "See the assets below to download."
+          releaseBody: "See the assets below to down
+load."
           releaseDraft: false
           prerelease: false
