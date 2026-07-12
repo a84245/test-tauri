@@ -25,3 +25,10 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# 仅 Windows 下用于设置进程级 AppUserModelID，使系统通知（Toast）的
+# 点击激活能正确回传到本进程。否则 Windows 会把点击当作幽灵事件静默丢弃，
+# 前端 onAction 不触发（窗口打不开、路由不跳转）。必须与开始菜单快捷方式
+# 注册的 AUMID 一致。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation"] }
+

@@ -63,6 +63,18 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Windows 通知（Toast）的点击激活依赖进程级 AppUserModelID，
+            // 且必须与「开始菜单快捷方式」注册的一致。否则系统会把 Toast 点击
+            // 当成幽灵事件静默丢弃，前端 onAction 不触发（窗口打不开、路由不跳转）。
+            #[cfg(windows)]
+            {
+                use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+                use windows::core::HSTRING;
+                let _ = unsafe {
+                    SetCurrentProcessExplicitAppUserModelID(&HSTRING::from("com.dev.pengmaitw"))
+                };
+            }
+
             // 创建主窗口（加载业务页面）。
             // 默认加载线上地址；本地联调时可用环境变量指定本地前端：
             //   PENGMAI_FRONTEND_URL=http://localhost:5000 pnpm tauri dev
