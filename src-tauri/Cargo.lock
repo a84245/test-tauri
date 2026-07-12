@@ -2424,6 +2424,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
+ "windows",
 ]
 
 [[package]]
