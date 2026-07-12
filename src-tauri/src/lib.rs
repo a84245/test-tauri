@@ -54,22 +54,15 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Windows 通知依赖进程级 AppUserModelID，且必须与「开始菜单快捷方式」注册的一致，
-            // 否则系统会把 Toast 当成幽灵通知静默丢弃，应用也不会出现在通知设置列表里。
-            #[cfg(windows)]
-            {
-                use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
-                use windows::core::HSTRING;
-                let _ = unsafe {
-                    SetCurrentProcessExplicitAppUserModelID(&HSTRING::from("com.dev.pengmaitw"))
-                };
-            }
-
-            // 创建主窗口（加载远程业务页面）
+            // 创建主窗口（加载业务页面）。
+            // 默认加载线上地址；本地联调时可用环境变量指定本地前端：
+            //   PENGMAI_FRONTEND_URL=http://localhost:5000 pnpm tauri dev
+            let frontend_url = std::env::var("PENGMAI_FRONTEND_URL")
+                .unwrap_or_else(|_| "http://110.42.239.85:5000".to_string());
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
-                tauri::WebviewUrl::External("http://110.42.239.85:5000".parse().unwrap()),
+                tauri::WebviewUrl::External(frontend_url.parse().unwrap()),
             )
             .title("芃麦印刷")
             .inner_size(1200.0, 800.0)

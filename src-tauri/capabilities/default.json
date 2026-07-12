@@ -4,10 +4,16 @@
   "description": "Capability for the main window",
   "windows": ["main"],
   "remote": {
-    "urls": ["http://110.42.239.85:5000"]
+    "urls": [
+      "http://110.42.239.85:5000",
+      "http://localhost:5000",
+      "http://127.0.0.1:5000"
+    ]
   },
   "permissions": [
     "core:default",
-    "opener:default"
+    "opener:default",
+    "notification:default",
+    "allow-notify"
   ]
 }
