@@ -1,5 +1,5 @@
 use tauri::{
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
@@ -16,15 +16,74 @@ fn notify(
     body: Option<String>,
     id: Option<i32>,
 ) -> Result<(), String> {
-    let mut builder = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(body.unwrap_or_default());
-    if let Some(id) = id {
-        builder = builder.id(id);
+    send_notification(&app, title, body.unwrap_or_default(), id)
+}
+
+/// 通知点击动作事件载荷，前端据此恢复窗口并跳转路由。
+#[derive(Clone, serde::Serialize)]
+struct NotificationAction {
+    id: Option<u32>,
+}
+
+/// 发送系统通知。
+/// Windows / macOS（主要支持平台）走官方 tauri-plugin-notification，
+/// 点击由前端 plugin-notification 的 onAction 接收，自动恢复窗口并跳路由，
+/// 这是主路径，行为稳定。
+/// Linux 桌面端 tauri-plugin-notification 的 show() 会丢弃 NotificationHandle，
+/// 收不到点击回调，因此改走 notify-rust 并阻塞等待点击（见下方注释）。
+fn send_notification(
+    app: &tauri::AppHandle,
+    title: String,
+    body: String,
+    id: Option<i32>,
+) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        use notify_rust::Notification;
+        let mut n = Notification::new();
+        n.summary(&title).body(&body).appname("pengmaitw");
+        if let Some(id) = id {
+            n.id(id as u32);
+        }
+        // 注册默认动作，确保点击通知体或动作按钮都能触发 "default"
+        n.action("default", "打开");
+        match n.show() {
+            Ok(handle) => {
+                let app2 = app.clone();
+                std::thread::spawn(move || {
+                    handle.wait_for_action(move |action: &str| {
+                        // "__closed" 表示用户直接关闭（未点击），不恢复窗口
+                        if action != "__closed" {
+                            if let Some(window) = app2.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                            // 通知前端点击动作，让前端做路由跳转（Linux 下
+                            // tauri-plugin-notification 的 onAction 不会触发）。
+                            let _ = app2.emit("notification:action", NotificationAction {
+                                id: id.map(|i| i as u32),
+                            });
+                        }
+                    });
+                });
+                Ok(())
+            }
+            Err(e) => Err(format!("发送通知失败: {e}")),
+        }
     }
-    builder.show().map_err(|e| e.to_string())
+    #[cfg(not(target_os = "linux"))]
+    {
+        let mut builder = app
+            .notification()
+            .builder()
+            .title(title)
+            .body(body);
+        if let Some(id) = id {
+            builder = builder.id(id);
+        }
+        builder.show().map_err(|e| e.to_string())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

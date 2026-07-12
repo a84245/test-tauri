@@ -10,19 +10,16 @@
     <button id="notify-btn">发送系统通知</button>
 
     <script type="module">
-      // 方式一：使用全局 API（已开启 withGlobalTauri）
+      // 走壳原生 notify 命令（Linux 下点击通知可直接恢复窗口，
+      // Windows/macOS 下由前端 onAction 恢复窗口并跳路由）
+      const { invoke } = window.__TAURI__.core;
       const notifyBtn = document.getElementById("notify-btn");
       notifyBtn.addEventListener("click", async () => {
-        const { sendNotification } = window.__TAURI__.notification;
-        sendNotification({
+        await invoke("notify", {
           title: "芃麦印刷",
-          body: "这是一条来自 Web 的系统通知！",
+          body: "这是一条来自壳原生 API 的系统通知！点击我会打开窗口。",
         });
       });
-
-      // 方式二：使用 npm 包 @tauri-apps/plugin-notification
-      // import { sendNotification } from "@tauri-apps/plugin-notification";
-      // sendNotification({ title: "标题", body: "内容" });
     </script>
   </body>
 </html>
