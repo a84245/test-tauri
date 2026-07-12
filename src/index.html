@@ -5,5 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>芃麦印刷</title>
   </head>
-  <body></body>
+  <body>
+    <h1>芃麦印刷</h1>
+    <button id="notify-btn">发送系统通知</button>
+
+    <script type="module">
+      // 方式一：使用全局 API（已开启 withGlobalTauri）
+      const notifyBtn = document.getElementById("notify-btn");
+      notifyBtn.addEventListener("click", async () => {
+        const { sendNotification } = window.__TAURI__.notification;
+        sendNotification({
+          title: "芃麦印刷",
+          body: "这是一条来自 Web 的系统通知！",
+        });
+      });
+
+      // 方式二：使用 npm 包 @tauri-apps/plugin-notification
+      // import { sendNotification } from "@tauri-apps/plugin-notification";
+      // sendNotification({ title: "标题", body: "内容" });
+    </script>
+  </body>
 </html>
