@@ -54,6 +54,17 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Windows 通知依赖进程级 AppUserModelID，且必须与「开始菜单快捷方式」注册的一致，
+            // 否则系统会把 Toast 当成幽灵通知静默丢弃，应用也不会出现在通知设置列表里。
+            #[cfg(windows)]
+            {
+                use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+                use windows::core::HSTRING;
+                let _ = unsafe {
+                    SetCurrentProcessExplicitAppUserModelID(&HSTRING::from("com.dev.pengmaitw"))
+                };
+            }
+
             // 创建主窗口（加载远程业务页面）
             tauri::WebviewWindowBuilder::new(
                 app,

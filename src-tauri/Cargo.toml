@@ -1,6 +1,6 @@
 [package]
 name = "pengmaitw"
-version = "0.2.5"
+version = "0.2.6"
 description = "芃麦印刷"
 authors = ["you"]
 edition = "2021"
@@ -19,6 +19,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
+# 仅 Windows 下用于设置进程级 AppUserModelID，使系统通知能正确关联到本程序
+windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2.3"
 tauri-plugin-dialog = "2"
