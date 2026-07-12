@@ -4,6 +4,19 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_notification::NotificationExt;
+
+/// 由前端调用的自定义命令：用壳（Rust）原生 API 发送系统通知。
+/// 这样绕开 Web Notification 的 HTTPS 安全上下文限制，也不经过通知插件的前端 ACL。
+#[tauri::command]
+fn notify(app: tauri::AppHandle, title: String, body: Option<String>) -> Result<(), String> {
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body.unwrap_or_default())
+        .show()
+        .map_err(|e| e.to_string())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![notify])
         .on_window_event(|window, event| {
             // 拦截主窗口关闭：弹原生对话框，询问「后台挂起」或「退出程序」
             if let WindowEvent::CloseRequested { api, .. } = event {
