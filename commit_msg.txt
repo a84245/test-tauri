@@ -1,5 +1,0 @@
-feat: 通知改由壳原生发送(B方案)，绕开HTTP安全上下文与ACL
-
-- lib.rs 新增自定义命令 notify，用 NotificationExt 原生 API 发通知
-- capabilities 增加 remote.urls 授权远程 HTTP 页面 IPC，移除冗余 notification/core 权限
-- 升级版本至 0.2.5
