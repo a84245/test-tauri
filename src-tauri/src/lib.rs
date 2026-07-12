@@ -1,14 +1,44 @@
 use tauri::{
-    Manager,
+    Manager, WindowEvent,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            // 拦截主窗口关闭：弹原生对话框，询问「后台挂起」或「退出程序」
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    // 阻止默认关闭行为
+                    api.prevent_close();
+                    let window = window.clone();
+                    let app = window.app_handle().clone();
+                    window
+                        .dialog()
+                        .message("关闭后程序将最小化到系统托盘后台运行，仍可接收系统通知。你也可以选择退出程序。")
+                        .title("是否后台挂起？")
+                        .buttons(MessageDialogButtons::OkCancelCustom(
+                            "后台挂起".to_string(),
+                            "退出程序".to_string(),
+                        ))
+                        .show(move |answer| {
+                            if answer {
+                                // 后台挂起：隐藏窗口到托盘，进程继续运行
+                                let _ = window.hide();
+                            } else {
+                                // 退出程序
+                                app.exit(0);
+                            }
+                        });
+                }
+            }
+        })
         .setup(|app| {
             // 创建主窗口（加载远程业务页面）
             tauri::WebviewWindowBuilder::new(
