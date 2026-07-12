@@ -1,0 +1,17 @@
+# .cnb.yml
+$:
+  vscode:
+    - runner:
+        cpus: 8
+      docker:
+        image: docker.cnb.cool/sshinelt/ide/electron-ide
+      services:
+        - vscode
+        - docker
+      stages:
+        - name: config-npm
+          script: npm config set registry https://mirrors.cloud.tencent.com/npm
+        - name: install-package
+          script: npm install -g pnpm && pnpm config set store-dir ~/.pnpm-store && pnpm i
+        - name: install-vscode-codebuddy
+          script: code-server --install-extension tencent-cloud.coding-copilot
