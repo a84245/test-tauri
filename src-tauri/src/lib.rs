@@ -58,23 +58,29 @@ fn send_notification(
         match n.show() {
             Ok(handle) => {
                 let app2 = app.clone();
+                let id_for_emit = id;
                 std::thread::spawn(move || {
                     eprintln!("[notify] 等待通知点击（wait_for_action）...");
                     handle.wait_for_action(move |action: &str| {
                         eprintln!("[notify] 收到点击动作 action={action:?}");
                         // "__closed" 表示用户直接关闭（未点击），不恢复窗口
                         if action != "__closed" {
-                            if let Some(window) = app2.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                                eprintln!("[notify] 窗口已恢复");
-                            } else {
-                                eprintln!("[notify] 未找到 main 窗口！");
-                            }
+                            // 窗口操作必须在主线程执行（Windows 下跨线程
+                            // ShowWindow/SetForegroundWindow 对隐藏窗口无效）
+                            let app3 = app2.clone();
+                            let _ = app2.run_on_main_thread(move || {
+                                if let Some(window) = app3.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.unminimize();
+                                    let _ = window.set_focus();
+                                    eprintln!("[notify] 窗口已恢复（主线程）");
+                                } else {
+                                    eprintln!("[notify] 未找到 main 窗口！");
+                                }
+                            });
                             // 通知前端点击动作，让前端做路由跳转
                             let payload = NotificationAction {
-                                id: id.map(|i| i as u32),
+                                id: id_for_emit.map(|i| i as u32),
                             };
                             match app2.emit("notification:action", payload) {
                                 Ok(_) => eprintln!("[notify] notification:action 事件已发出"),
