@@ -1,9 +1,11 @@
+#[allow(unused_imports)]
 use tauri::{
     Emitter, Manager, WindowEvent,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+#[cfg(target_os = "macos")]
 use tauri_plugin_notification::NotificationExt;
 
 /// 由前端调用的自定义命令：用壳（Rust）原生 API 发送系统通知。
@@ -16,28 +18,34 @@ fn notify(
     body: Option<String>,
     id: Option<i32>,
 ) -> Result<(), String> {
+    eprintln!(
+        "[notify] 收到前端通知请求 title={title:?} body={:?} id={id:?}",
+        body.as_deref().unwrap_or("")
+    );
     send_notification(&app, title, body.unwrap_or_default(), id)
 }
 
 /// 通知点击动作事件载荷，前端据此恢复窗口并跳转路由。
+/// Linux 路径通过 notify-rust 的 wait_for_action 回调 emit 此事件。
 #[derive(Clone, serde::Serialize)]
+#[allow(dead_code)]
 struct NotificationAction {
     id: Option<u32>,
 }
 
 /// 发送系统通知。
-/// Windows / macOS（主要支持平台）走官方 tauri-plugin-notification，
-/// 点击由前端 plugin-notification 的 onAction 接收，自动恢复窗口并跳路由，
-/// 这是主路径，行为稳定。
-/// Linux 桌面端 tauri-plugin-notification 的 show() 会丢弃 NotificationHandle，
-/// 收不到点击回调，因此改走 notify-rust 并阻塞等待点击（见下方注释）。
+/// Linux / Windows：走 notify-rust 并阻塞等待点击动作，回调中直接恢复窗口 +
+/// emit notification:action 事件给前端做路由跳转。这样可以绕开
+/// tauri-plugin-notification 在 Linux 桌面端丢弃 NotificationHandle、
+/// 以及在 Windows 上 COM 激活注册可能失败导致 onAction 不触发的问题。
+/// macOS：走 tauri-plugin-notification（该平台行为稳定）。
 fn send_notification(
     app: &tauri::AppHandle,
     title: String,
     body: String,
     id: Option<i32>,
 ) -> Result<(), String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
         use notify_rust::Notification;
         let mut n = Notification::new();
@@ -51,38 +59,62 @@ fn send_notification(
             Ok(handle) => {
                 let app2 = app.clone();
                 std::thread::spawn(move || {
+                    eprintln!("[notify] 等待通知点击（wait_for_action）...");
                     handle.wait_for_action(move |action: &str| {
+                        eprintln!("[notify] 收到点击动作 action={action:?}");
                         // "__closed" 表示用户直接关闭（未点击），不恢复窗口
                         if action != "__closed" {
                             if let Some(window) = app2.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.unminimize();
                                 let _ = window.set_focus();
+                                eprintln!("[notify] 窗口已恢复");
+                            } else {
+                                eprintln!("[notify] 未找到 main 窗口！");
                             }
-                            // 通知前端点击动作，让前端做路由跳转（Linux 下
-                            // tauri-plugin-notification 的 onAction 不会触发）。
-                            let _ = app2.emit("notification:action", NotificationAction {
+                            // 通知前端点击动作，让前端做路由跳转
+                            let payload = NotificationAction {
                                 id: id.map(|i| i as u32),
-                            });
+                            };
+                            match app2.emit("notification:action", payload) {
+                                Ok(_) => eprintln!("[notify] notification:action 事件已发出"),
+                                Err(e) => eprintln!("[notify] 事件发送失败：{e}"),
+                            }
+                        } else {
+                            eprintln!("[notify] 通知被关闭/忽略");
                         }
                     });
                 });
+                eprintln!("[notify] 通知已发送（notify-rust）title={title:?} id={id:?}");
                 Ok(())
             }
-            Err(e) => Err(format!("发送通知失败: {e}")),
+            Err(e) => {
+                eprintln!("[notify] 通知发送失败：{e}");
+                Err(format!("发送通知失败: {e}"))
+            }
         }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
+        eprintln!("[notify] macOS 发送通知 title={title:?} body={body:?} id={id:?}");
         let mut builder = app
             .notification()
             .builder()
-            .title(title)
-            .body(body);
-        if let Some(id) = id {
-            builder = builder.id(id);
+            .title(&title)
+            .body(&body);
+        if let Some(ref id_val) = id {
+            builder = builder.id(*id_val);
         }
-        builder.show().map_err(|e| e.to_string())
+        match builder.show() {
+            Ok(_) => {
+                eprintln!("[notify] macOS 通知已成功发送");
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("[notify] macOS 通知发送失败：{e}");
+                Err(e.to_string())
+            }
+        }
     }
 }
 
@@ -122,23 +154,15 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Windows 通知（Toast）的点击激活依赖进程级 AppUserModelID，
-            // 且必须与「开始菜单快捷方式」注册的一致。否则系统会把 Toast 点击
-            // 当成幽灵事件静默丢弃，前端 onAction 不触发（窗口打不开、路由不跳转）。
-            #[cfg(windows)]
-            {
-                use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
-                use windows::core::HSTRING;
-                let _ = unsafe {
-                    SetCurrentProcessExplicitAppUserModelID(&HSTRING::from("com.dev.pengmaitw"))
-                };
-            }
+            // 进程级 AppUserModelID 已在 main.rs 中设置（早于插件初始化），
+            // tauri-plugin-notification 的 Windows COM 激活器将使用正确的 AUMID
+            // 进行注册，确保 Toast 通知点击能正确回传到本进程。
 
             // 创建主窗口（加载业务页面）。
             // 默认加载线上地址；本地联调时可用环境变量指定本地前端：
             //   PENGMAI_FRONTEND_URL=http://localhost:5000 pnpm tauri dev
             let frontend_url = std::env::var("PENGMAI_FRONTEND_URL")
-                .unwrap_or_else(|_| "http://110.42.239.85:5000".to_string());
+                .unwrap_or_else(|_| "http://localhost:5000".to_string());
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
