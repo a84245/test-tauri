@@ -168,7 +168,7 @@ pub fn run() {
             // 默认加载线上地址；本地联调时可用环境变量指定本地前端：
             //   PENGMAI_FRONTEND_URL=http://localhost:5000 pnpm tauri dev
             let frontend_url = std::env::var("PENGMAI_FRONTEND_URL")
-                .unwrap_or_else(|_| "http://localhost:5000".to_string());
+                .unwrap_or_else(|_| "http://110.42.239.85:5000".to_string());
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
