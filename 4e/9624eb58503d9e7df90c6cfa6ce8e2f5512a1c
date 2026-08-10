@@ -1,0 +1,34 @@
+src-tauri/capabilities/default.json
+  s_b1dce5843b4c59::t_094b724a7b2fbb 17-18
+src-tauri/src/lib.rs
+  s_b1dce5843b4c59::t_c871759219f494 182
+  s_b1dce5843b4c59::t_e7df93698fff10 36-84
+src-tauri/build.rs
+  s_b1dce5843b4c59::t_b403aaef335fe5 8
+CLAUDE.md
+  s_b1dce5843b4c59::t_e41559bacbd7aa 1-109
+.gitignore
+  s_b1dce5843b4c59::t_45ff612de1e5e0 25-28
+package.json
+  s_b1dce5843b4c59::t_8e54c4c2aaabb7 4
+src-tauri/Cargo.toml
+  s_b1dce5843b4c59::t_c1cfebe215cfed 3
+src-tauri/tauri.conf.json
+  s_b1dce5843b4c59::t_d7a4e26bc67fda 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "4e9624eb58503d9e7df90c6cfa6ce8e2f5512a1c",
+  "prompts": {},
+  "sessions": {
+    "s_b1dce5843b4c59": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e27ad44-9f57-4762-aeea-a74ef05f5d4f",
+        "model": "glm-5.2"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
