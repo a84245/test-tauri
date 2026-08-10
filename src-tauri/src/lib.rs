@@ -33,6 +33,55 @@ struct NotificationAction {
     id: Option<u32>,
 }
 
+/// 由前端调用的自定义命令：在 Windows 资源管理器中打开本地挂载盘（P:\）的
+/// 对应文件夹并选中文件。配合员工端 rclone + WinFsp 挂载 MinIO 到 P:\ 使用。
+///
+/// `local_path` 期望是绝对路径，例如：
+///   - 选中文件：`P:\Staff_Workspace\...\海报.ai` → explorer /select,"该路径"
+///   - 打开文件夹：`P:\Staff_Workspace\...\客户文件夹` → 直接 explorer "该路径"
+///
+/// 返回值：
+///   - `Ok("opened")` 成功启动 explorer
+///   - `Err(msg)` 路径不存在 / 挂载盘未就绪 / 启动失败（前端据此回退到预览）
+#[tauri::command]
+fn open_local_folder(local_path: String) -> Result<String, String> {
+    eprintln!("[open_local_folder] 收到本地路径 local_path={local_path:?}");
+
+    // 1) 校验必须是绝对盘符路径（防注入/防穿越）
+    if !local_path.contains(':') || local_path.len() < 3 {
+        return Err(format!("非法本地路径: {local_path}"));
+    }
+
+    // 2) 校验路径存在 —— 若 P:\ 未挂载或文件不存在，立刻失败给前端回退
+    let path = std::path::Path::new(&local_path);
+    if !path.exists() {
+        eprintln!("[open_local_folder] 路径不存在（可能挂载盘未就绪）: {local_path}");
+        return Err(format!("路径不存在（请确认本地挂载盘 P:\\ 已启动）: {local_path}"));
+    }
+
+    // 3) 区分：文件 → /select 选中；目录 → 直接打开
+    let (program, args) = if path.is_dir() {
+        ("explorer.exe", vec![local_path.clone()])
+    } else {
+        // /select,"路径" —— 用逗号分隔参数，路径加引号，文件名含空格也安全
+        ("explorer.exe", vec!["/select,".to_string(), local_path.clone()])
+    };
+
+    match std::process::Command::new(program)
+        .args(&args)
+        .spawn()
+    {
+        Ok(_) => {
+            eprintln!("[open_local_folder] 已在资源管理器中打开: {local_path}");
+            Ok("opened".to_string())
+        }
+        Err(e) => {
+            eprintln!("[open_local_folder] 启动 explorer 失败: {e}");
+            Err(format!("打开资源管理器失败: {e}"))
+        }
+    }
+}
+
 /// 发送系统通知。
 /// Linux / Windows：走 notify-rust 并阻塞等待点击动作，回调中直接恢复窗口 +
 /// emit notification:action 事件给前端做路由跳转。这样可以绕开
@@ -130,7 +179,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![notify])
+        .invoke_handler(tauri::generate_handler![notify, open_local_folder])
         .on_window_event(|window, event| {
             // 拦截主窗口关闭：弹原生对话框，询问「后台挂起」或「退出程序」
             if let WindowEvent::CloseRequested { api, .. } = event {

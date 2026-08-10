@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust installer (temporary download)
+rustup-init.exe
+*.exe
