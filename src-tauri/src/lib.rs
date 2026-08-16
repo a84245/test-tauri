@@ -5,6 +5,8 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use rdev::{listen, Event, EventType, Key};
+use std::time::Instant;
 #[cfg(target_os = "macos")]
 use tauri_plugin_notification::NotificationExt;
 
@@ -124,6 +126,49 @@ fn send_notification(
     }
 }
 
+/// 全局键盘监听：捕获扫码枪输入（即使窗口失焦/后台运行也能收到）。
+/// 识别规则与前端一致：连续字符间隔 <80ms 视为扫码枪，Enter 结束一条。
+/// 识别到完整条码后 emit `scan:code` 事件给前端处理。
+fn start_scan_listener(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut buf = String::new();
+        let mut last = Instant::now();
+
+        if let Err(e) = listen(move |event: Event| {
+            match event.event_type {
+                EventType::KeyPress(Key::Return) => {
+                    let code = buf.trim().to_string();
+                    buf.clear();
+                    if !code.is_empty() {
+                        let _ = app.emit("scan:code", code);
+                    }
+                }
+                EventType::KeyPress(_) => {
+                    // event.name 是 OS 解释后的字符（尊重大小写/键盘布局），
+                    // 只累积单个可打印字符（数字/字母/常用符号）。
+                    if let Some(name) = event.name {
+                        if name.chars().count() == 1 {
+                            let now = Instant::now();
+                            let fast = now.duration_since(last).as_millis() < 80;
+                            last = now;
+                            if fast {
+                                buf.push_str(&name);
+                            } else {
+                                // 慢速输入：视为普通打字，重新开始
+                                buf.clear();
+                                buf.push_str(&name);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }) {
+            eprintln!("[scan] 全局键盘监听启动失败: {e}");
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -218,6 +263,9 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // 启动全局扫码监听（窗口后台/失焦也能扫）
+            start_scan_listener(app.handle().clone());
 
             Ok(())
         })
