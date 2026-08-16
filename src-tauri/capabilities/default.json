@@ -12,7 +12,6 @@
   },
   "permissions": [
     "core:default",
-    "opener:default",
     "notification:default",
     "allow-notify",
     "allow-open-local-folder"

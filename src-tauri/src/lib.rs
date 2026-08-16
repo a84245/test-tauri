@@ -213,7 +213,7 @@ fn start_scan_listener(app: tauri::AppHandle) {
                 _ => {}
             }
         }) {
-            eprintln!("[scan] 全局键盘监听启动失败: {e}");
+            eprintln!("[scan] 全局键盘监听启动失败: {e:?}");
         }
     });
 }
@@ -221,7 +221,6 @@ fn start_scan_listener(app: tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![notify, open_local_folder])
@@ -263,6 +262,8 @@ pub fn run() {
             //   PENGMAI_FRONTEND_URL=http://localhost:5000 pnpm tauri dev
             let frontend_url = std::env::var("PENGMAI_FRONTEND_URL")
                 .unwrap_or_else(|_| "http://110.42.239.85:5000".to_string());
+            // 主窗口的 app handle，供 on_new_window 闭包创建子窗口用
+            let app_handle = app.handle().clone();
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -270,6 +271,40 @@ pub fn run() {
             )
             .title("芃麦印刷")
             .inner_size(1200.0, 800.0)
+            // window.open 在应用内新开窗口（预览/工作单等），不弹系统浏览器
+            .on_new_window(move |url, features| {
+                let handle = app_handle.clone();
+                // window.open('') 打开空白窗口供前端 document.write（工作单场景）
+                let target = if url.as_str().is_empty() || url.as_str() == "about:blank" {
+                    "about:blank".to_string()
+                } else {
+                    url.to_string()
+                };
+                let label = format!(
+                    "window_{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
+                let window = tauri::WebviewWindowBuilder::new(
+                    &handle,
+                    &label,
+                    tauri::WebviewUrl::External(target.parse().unwrap()),
+                )
+                .title(url.as_str())
+                .window_features(features)
+                .on_document_title_changed(|window, title| {
+                    let _ = window.set_title(&title);
+                })
+                .build();
+                match window {
+                    Ok(w) => tauri::webview::NewWindowResponse::Create { window: w },
+                    Err(_) => tauri::webview::NewWindowResponse::Deny,
+                }
+            })
+            // 放行下载（WebView2 默认弹保存对话框）
+            .on_download(|_webview, _event| true)
             .build()?;
 
             // 系统托盘菜单：左键点击恢复主界面，右键弹出菜单
