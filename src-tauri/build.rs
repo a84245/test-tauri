@@ -5,7 +5,7 @@ fn main() {
     // 否则前端 invoke('notify') 会被 ACL 拒绝（notify not allowed. Plugin not found）。
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(
-            tauri_build::AppManifest::new().commands(&["notify"]),
+            tauri_build::AppManifest::new().commands(&["notify", "open_local_folder"]),
         ),
     )
     .expect("failed to run tauri-build");
