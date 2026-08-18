@@ -1,0 +1,21 @@
+src-tauri/Cargo.toml
+  s_73d05cdfa39ddc::t_ede4c59a3bd18b 26
+src-tauri/src/lib.rs
+  s_73d05cdfa39ddc::t_bc133e845b045c 87-116,256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "e8f6b5ac2cde3a71320a151d382aa801d66eb009",
+  "prompts": {},
+  "sessions": {
+    "s_73d05cdfa39ddc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_73d05cdfa39ddc",
+        "model": "unknown"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
