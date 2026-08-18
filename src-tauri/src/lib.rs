@@ -84,6 +84,36 @@ fn open_local_folder(local_path: String) -> Result<String, String> {
     }
 }
 
+/// 返回当前应用版本号（如 "0.3.0"），前端用于升级检查对比
+#[tauri::command]
+fn get_app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// 下载并启动安装程序：下载安装包到临时目录，然后运行它（弹出安装向导）
+/// 前端先拿到最新版下载 URL，调此命令完成「下载 + 启动安装」
+#[tauri::command]
+fn download_and_install(url: String) -> Result<String, String> {
+    eprintln!("[download_and_install] 下载安装包: {url}");
+    // 1) 下载到临时目录
+    let dest = std::env::temp_dir().join("pengmaitw_latest_setup.exe");
+    let resp = reqwest::blocking::get(&url)
+        .map_err(|e| format!("下载失败: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("下载失败，状态码: {}", resp.status()));
+    }
+    let bytes = resp.bytes().map_err(|e| format!("读取下载内容失败: {e}"))?;
+    std::fs::write(&dest, &bytes).map_err(|e| format!("写入安装包失败: {e}"))?;
+    eprintln!("[download_and_install] 已下载到 {}", dest.display());
+
+    // 2) 启动安装程序（NSIS 弹安装向导）
+    std::process::Command::new(&dest)
+        .spawn()
+        .map_err(|e| format!("启动安装程序失败: {e}"))?;
+
+    Ok(format!("已下载并启动安装程序: {}", dest.display()))
+}
+
 /// 发送系统通知。
 /// Linux / Windows：走 notify-rust 并阻塞等待点击动作，回调中直接恢复窗口 +
 /// emit notification:action 事件给前端做路由跳转。这样可以绕开
@@ -223,7 +253,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![notify, open_local_folder])
+        .invoke_handler(tauri::generate_handler![notify, open_local_folder, get_app_version, download_and_install])
         .on_window_event(|window, event| {
             // 拦截主窗口关闭：弹原生对话框，询问「后台挂起」或「退出程序」
             if let WindowEvent::CloseRequested { api, .. } = event {

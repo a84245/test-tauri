@@ -23,6 +23,7 @@ tauri-plugin-notification = "2.3"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+reqwest = { version = "0.12", features = ["blocking"] }
 # Linux 下直接用 notify-rust 发通知并监听点击动作（tauri-plugin-notification
 # 桌面端 show() 会丢弃 NotificationHandle，无法收到点击回调）。
 notify-rust = "4"
