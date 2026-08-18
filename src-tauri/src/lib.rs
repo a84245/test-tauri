@@ -257,6 +257,17 @@ pub fn run() {
             // tauri-plugin-notification 的 Windows COM 激活器将使用正确的 AUMID
             // 进行注册，确保 Toast 通知点击能正确回传到本进程。
 
+            // 启动时清理 WebView2 缓存，避免加载失败响应(404)被缓存导致白屏/404
+            // 必须在创建窗口(WebView)之前执行，否则缓存目录被占用删不掉
+            if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
+                let cache_dir = std::path::Path::new(&appdata)
+                    .join("com.dev.pengmaitw")
+                    .join("EBWebView");
+                if cache_dir.exists() {
+                    let _ = std::fs::remove_dir_all(&cache_dir);
+                }
+            }
+
             // 创建主窗口（加载业务页面）。
             // 默认加载线上地址；本地联调时可用环境变量指定本地前端：
             //   PENGMAI_FRONTEND_URL=http://localhost:5000 pnpm tauri dev
