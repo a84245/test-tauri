@@ -93,6 +93,7 @@ jobs:
 
       - name: Extract version from tag
         id: meta
+        shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Build release bundles (signed updater artifacts)
@@ -100,6 +101,7 @@ jobs:
 
       # 上传 updater 安装包 + .sig 到 MinIO，并生成平台片段（manifest 汇总用）
       - name: Publish updater artifacts to MinIO
+        shell: bash
         env:
           MINIO_ENDPOINT: ${{ secrets.MINIO_EXTERNAL_ENDPOINT }}
           MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
@@ -150,6 +152,7 @@ jobs:
           merge-multiple: true
 
       - name: Emit & upload latest.json
+        shell: bash
         env:
           MINIO_ENDPOINT: ${{ secrets.MINIO_EXTERNAL_ENDPOINT }}
           MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
