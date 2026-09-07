@@ -14,6 +14,7 @@
     "core:default",
     "notification:default",
     "allow-notify",
-    "allow-open-local-folder"
+    "allow-open-local-folder",
+    "allow-get-app-version"
   ]
 }

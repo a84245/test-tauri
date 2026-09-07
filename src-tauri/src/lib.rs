@@ -5,8 +5,11 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_updater::UpdaterExt;
 use rdev::{listen, Event, EventType, Key};
 use std::time::Instant;
+#[cfg(not(debug_assertions))]
+use std::time::Duration;
 #[cfg(target_os = "macos")]
 use tauri_plugin_notification::NotificationExt;
 
@@ -84,34 +87,107 @@ fn open_local_folder(local_path: String) -> Result<String, String> {
     }
 }
 
-/// 返回当前应用版本号（如 "0.3.0"），前端用于升级检查对比
+/// 返回当前应用版本号（如 "0.3.1"），前端用于升级检查对比
 #[tauri::command]
 fn get_app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
-/// 下载并启动安装程序：下载安装包到临时目录，然后运行它（弹出安装向导）
-/// 前端先拿到最新版下载 URL，调此命令完成「下载 + 启动安装」
-#[tauri::command]
-fn download_and_install(url: String) -> Result<String, String> {
-    eprintln!("[download_and_install] 下载安装包: {url}");
-    // 1) 下载到临时目录
-    let dest = std::env::temp_dir().join("pengmaitw_latest_setup.exe");
-    let resp = reqwest::blocking::get(&url)
-        .map_err(|e| format!("下载失败: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("下载失败，状态码: {}", resp.status()));
+/// 检查是否有新版本并（如有）提示用户下载安装。
+/// `manual`：托盘手动触发时，无更新/失败会弹提示；启动时自动检查仅记日志。
+async fn check_for_updates(app: tauri::AppHandle, manual: bool) {
+    eprintln!("[update] 开始检查更新 (manual={manual})");
+    let result = match app.updater() {
+        Ok(updater) => updater.check().await.map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    match result {
+        Ok(Some(update)) => {
+            let version = update.version.clone();
+            eprintln!(
+                "[update] 发现新版本 v{version}（当前 v{}）",
+                update.current_version
+            );
+            prompt_update(app, update);
+        }
+        Ok(None) => {
+            eprintln!("[update] 已是最新版本");
+            if manual {
+                let _ = app
+                    .dialog()
+                    .message("当前已是最新版本。")
+                    .title("检查更新")
+                    .buttons(MessageDialogButtons::Ok)
+                    .show(|_| {});
+            }
+        }
+        Err(e) => {
+            eprintln!("[update] 检查更新失败: {e}");
+            if manual {
+                let _ = app
+                    .dialog()
+                    .message(format!("检查更新失败：{e}\n请确认网络连接或稍后重试。"))
+                    .title("检查更新")
+                    .buttons(MessageDialogButtons::Ok)
+                    .show(|_| {});
+            }
+        }
     }
-    let bytes = resp.bytes().map_err(|e| format!("读取下载内容失败: {e}"))?;
-    std::fs::write(&dest, &bytes).map_err(|e| format!("写入安装包失败: {e}"))?;
-    eprintln!("[download_and_install] 已下载到 {}", dest.display());
+}
 
-    // 2) 启动安装程序（NSIS 弹安装向导）
-    std::process::Command::new(&dest)
-        .spawn()
-        .map_err(|e| format!("启动安装程序失败: {e}"))?;
+/// 弹确认框；确认后异步下载并安装（Windows 由 NSIS 安装器自动重启新版本）。
+fn prompt_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
+    let version = update.version.clone();
+    let current = update.current_version.clone();
+    let _ = app
+        .dialog()
+        .message(format!(
+            "检测到新版本 v{version}（当前 v{current}）。\n\n点击「立即更新」将自动下载并安装，完成后应用会自动重启。"
+        ))
+        .title("发现新版本")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "立即更新".to_string(),
+            "稍后".to_string(),
+        ))
+        .show(move |ok| {
+            if ok {
+                download_update(update);
+            } else {
+                eprintln!("[update] 用户选择稍后更新");
+            }
+        });
+}
 
-    Ok(format!("已下载并启动安装程序: {}", dest.display()))
+/// 后台下载 + 安装新版本。
+fn download_update(update: tauri_plugin_updater::Update) {
+    eprintln!("[update] 开始下载并安装 v{} …", update.version);
+    tauri::async_runtime::spawn(async move {
+        let result = update
+            .download_and_install(
+                |downloaded, total| {
+                    eprintln!("[update] 下载进度: {downloaded} 字节 / 总 {total:?}");
+                },
+                || eprintln!("[update] 下载完成，正在安装…"),
+            )
+            .await;
+        match result {
+            Ok(_) => {
+                eprintln!("[update] 安装完成。");
+                // Windows 下 download_and_install 内部会启动 NSIS 安装器并 exit(0)，
+                // 不会执行到这里；macOS/Linux 装完后需要自行重启到新版本。
+                #[cfg(not(target_os = "windows"))]
+                {
+                    if let Ok(exe) = std::env::current_exe() {
+                        let _ = std::process::Command::new(exe).spawn();
+                    }
+                }
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("[update] 下载/安装失败: {e}");
+            }
+        }
+    });
 }
 
 /// 发送系统通知。
@@ -253,7 +329,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![notify, open_local_folder, get_app_version, download_and_install])
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![
+            notify,
+            open_local_folder,
+            get_app_version
+        ])
         .on_window_event(|window, event| {
             // 拦截主窗口关闭：弹原生对话框，询问「后台挂起」或「退出程序」
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -350,8 +431,9 @@ pub fn run() {
 
             // 系统托盘菜单：左键点击恢复主界面，右键弹出菜单
             let show_i = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>)?;
+            let update_i = MenuItem::with_id(app, "update", "检查更新…", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&show_i, &update_i, &quit_i])?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -365,6 +447,13 @@ pub fn run() {
                             let _ = window.unminimize();
                             let _ = window.set_focus();
                         }
+                    }
+                    "update" => {
+                        // 手动检查更新（有新版会弹确认框）
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            check_for_updates(app, true).await;
+                        });
                     }
                     "quit" => {
                         app.exit(0);
@@ -391,6 +480,19 @@ pub fn run() {
 
             // 启动全局扫码监听（窗口后台/失焦也能扫）
             start_scan_listener(app.handle().clone());
+
+            // 发布版启动约 8 秒后自动检查一次更新（有新版会弹确认框）。
+            // debug 构建不做自动检查，需要时用托盘「检查更新…」手动触发。
+            #[cfg(not(debug_assertions))]
+            {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(8));
+                    tauri::async_runtime::spawn(async move {
+                        check_for_updates(app_handle, false).await;
+                    });
+                });
+            }
 
             Ok(())
         })

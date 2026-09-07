@@ -1,21 +1,62 @@
 name: Release
+
+# 触发：push v* tag（版本号须与 src-tauri/Cargo.toml、tauri.conf.json 一致）
+# 产物双发：
+#   1) GitHub Release（人工下载兜底）
+#   2) MinIO/S3 公开只读目录（官方 updater 自动更新用）—— 上传安装包 + .sig + latest.json
+#
+# 需要的仓库配置（Settings -> Secrets and variables -> Actions）：
+#   Secrets:
+#     TAURI_SIGNING_PRIVATE_KEY    updater 签名私钥（tauri signer generate 生成的私钥内容）
+#     MINIO_EXTERNAL_ENDPOINT      MinIO 外部 S3 endpoint，如 https://fanmai.synology.me:8003
+#     MINIO_ACCESS_KEY             Access Key（需对该桶有写权限）
+#     MINIO_SECRET_KEY             Secret Key
+#   Variables:
+#     MINIO_BUCKET                 桶名，建议专用桶：pengmai-updates
+#     PUBLIC_BASE_URL              （可选）客户端公开前缀；缺省时用 endpoint/<bucket> 推导，
+#                                  即 https://fanmai.synology.me:8003/pengmai-updates
+#                                  桶内对象放在前缀 pengmaitw/updates/ 下
+#                                  部署：对该前缀配置匿名只读（s3:GetObject）。不建议整桶公开。
 on:
   push:
     tags:
       - "v*"
 
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  # updater 产物由 tauri.conf.json 里 plugins.updater.pubkey 校验，须与此私钥配对
+
 jobs:
-  release:
+  # 先建一次 Release，避免矩阵各 job 并发创建冲突
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "pengmaitw ${{ github.ref_name }}"
+          body: "安装包 + 自动更新（MinIO）。见下方 Assets。"
+          draft: false
+          prerelease: false
+
+  build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            os: windows
           - platform: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            os: linux
           - platform: macos-latest
             target: aarch64-apple-darwin
+            os: macos
     runs-on: ${{ matrix.platform }}
     permissions:
       contents: write
@@ -25,29 +66,94 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
-
       - uses: pnpm/action-setup@v4
         with:
           version: 9
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-latest'
+        if: matrix.os == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - run: pnpm install
-
-      - uses: tauri-apps/tauri-action@v0.6.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Python (for MinIO upload)
+        uses: actions/setup-python@v5
         with:
-          tagName: v__VERSION__
-          releaseName: "pengmaitw v__VERSION__"
-          releaseBody: "See the assets below to download."
-          releaseDraft: false
-          prerelease: false
+          python-version: "3.12"
+      - name: Install boto3
+        run: pip install boto3
+
+      - name: Install JS deps
+        run: pnpm install
+
+      - name: Extract version from tag
+        id: meta
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release bundles (signed updater artifacts)
+        run: pnpm tauri build
+
+      # 上传 updater 安装包 + .sig 到 MinIO，并生成平台片段（manifest 汇总用）
+      - name: Publish updater artifacts to MinIO
+        env:
+          MINIO_ENDPOINT: ${{ secrets.MINIO_EXTERNAL_ENDPOINT }}
+          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
+          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          MINIO_BUCKET: ${{ vars.MINIO_BUCKET }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          python .github/scripts/publish_updater.py upload \
+            "${{ matrix.os }}" "$VERSION" "src-tauri/target/release/bundle"
+
+      - name: Upload updater fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-fragments
+          path: fragments/*.json
+          if-no-files-found: error
+
+      # 双发：把各平台安装包挂到 GitHub Release 供人工下载
+      - name: Attach installers to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.sig
+
+  # 汇总各平台片段 → latest.json → 上传 MinIO
+  manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install boto3
+        run: pip install boto3
+
+      - name: Download updater fragments
+        uses: actions/download-artifact@v4
+        with:
+          name: updater-fragments
+          path: fragments
+          merge-multiple: true
+
+      - name: Emit & upload latest.json
+        env:
+          MINIO_ENDPOINT: ${{ secrets.MINIO_EXTERNAL_ENDPOINT }}
+          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
+          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          MINIO_BUCKET: ${{ vars.MINIO_BUCKET }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          python .github/scripts/publish_updater.py manifest \
+            "${VERSION#v}" "fragments"
