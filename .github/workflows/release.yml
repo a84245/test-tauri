@@ -24,6 +24,8 @@ on:
 
 env:
   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  # 本地生成的密钥未设口令（空密码），CI 无交互必须显式给空串，否则签名步骤会挂起等输入
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
   # updater 产物由 tauri.conf.json 里 plugins.updater.pubkey 校验，须与此私钥配对
 
 jobs:
