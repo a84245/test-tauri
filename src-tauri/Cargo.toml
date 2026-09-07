@@ -1,6 +1,6 @@
 [package]
 name = "pengmaitw"
-version = "0.3.2"
+version = "0.3.3"
 description = "Pengmai Printing"
 authors = ["you"]
 edition = "2021"

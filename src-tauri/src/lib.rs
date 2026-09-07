@@ -38,6 +38,20 @@ struct NotificationAction {
     id: Option<u32>,
 }
 
+/// 更新进度事件载荷，发给「下载进度」小窗（update_progress）。
+#[derive(Clone, serde::Serialize)]
+struct UpdateProgress {
+    /// 已下载字节数
+    downloaded: u64,
+    /// 总字节数（服务器可能不给 Content-Length，此时为 None）
+    total: Option<u64>,
+    /// 状态：start / downloading / installing / done / error
+    status: String,
+    /// error 状态时的错误描述
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
 /// 由前端调用的自定义命令：在 Windows 资源管理器中打开本地挂载盘（P:\）的
 /// 对应文件夹并选中文件。配合员工端 rclone + WinFsp 挂载 MinIO 到 P:\ 使用。
 ///
@@ -139,6 +153,7 @@ async fn check_for_updates(app: tauri::AppHandle, manual: bool) {
 fn prompt_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
     let version = update.version.clone();
     let current = update.current_version.clone();
+    let app2 = app.clone();
     let _ = app
         .dialog()
         .message(format!(
@@ -151,27 +166,94 @@ fn prompt_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
         ))
         .show(move |ok| {
             if ok {
-                download_update(update);
+                download_update(app2, update);
             } else {
                 eprintln!("[update] 用户选择稍后更新");
             }
         });
 }
 
-/// 后台下载 + 安装新版本。
-fn download_update(update: tauri_plugin_updater::Update) {
-    eprintln!("[update] 开始下载并安装 v{} …", update.version);
+/// 用户确认后：弹出「下载进度」小窗，后台下载，完成后自动进入安装。
+/// Windows：安装由 NSIS 被动模式接管（自带安装进度），装完自动重启；
+/// macOS/Linux：装完后自行拉起新版本再退出本进程。
+fn download_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
+    let version = update.version.clone();
+    eprintln!("[update] 开始下载并安装 v{version} …");
+
+    // 下载进度小窗（加载本地 update-progress.html，纯静态页，通过事件收进度）
+    if let Err(e) = tauri::WebviewWindowBuilder::new(
+        &app,
+        "update_progress",
+        tauri::WebviewUrl::App("update-progress.html".into()),
+    )
+    .title("正在更新")
+    .inner_size(460.0, 160.0)
+    .resizable(false)
+    .center()
+    .build()
+    {
+        eprintln!("[update] 进度窗创建失败（将静默下载）: {e}");
+    }
+
     tauri::async_runtime::spawn(async move {
-        let result = update
-            .download_and_install(
-                |downloaded, total| {
-                    eprintln!("[update] 下载进度: {downloaded} 字节 / 总 {total:?}");
+        let emitter = app.clone();
+        let _ = emitter.emit(
+            "update:progress",
+            UpdateProgress {
+                downloaded: 0,
+                total: None,
+                status: "start".into(),
+                message: None,
+            },
+        );
+
+        // 进度回调（每约 256KiB 发一次，避免高频事件刷屏）
+        let emitter_prog = emitter.clone();
+        let mut acc: u64 = 0;
+        let mut last_sent: u64 = 0;
+        let on_chunk = move |downloaded: usize, total: Option<u64>| {
+            acc += downloaded as u64;
+            if acc >= last_sent + 262_144 {
+                last_sent = acc;
+                let _ = emitter_prog.emit(
+                    "update:progress",
+                    UpdateProgress {
+                        downloaded: acc,
+                        total,
+                        status: "downloading".into(),
+                        message: None,
+                    },
+                );
+            }
+        };
+        // 下载完成（进入安装阶段）
+        let emitter_done = emitter.clone();
+        let on_finish = move || {
+            let _ = emitter_done.emit(
+                "update:progress",
+                UpdateProgress {
+                    downloaded: 0,
+                    total: None,
+                    status: "installing".into(),
+                    message: None,
                 },
-                || eprintln!("[update] 下载完成，正在安装…"),
-            )
+            );
+        };
+
+        let result = update
+            .download_and_install(on_chunk, on_finish)
             .await;
         match result {
             Ok(_) => {
+                let _ = emitter.emit(
+                    "update:progress",
+                    UpdateProgress {
+                        downloaded: 0,
+                        total: None,
+                        status: "done".into(),
+                        message: None,
+                    },
+                );
                 eprintln!("[update] 安装完成。");
                 // Windows 下 download_and_install 内部会启动 NSIS 安装器并 exit(0)，
                 // 不会执行到这里；macOS/Linux 装完后需要自行重启到新版本。
@@ -184,7 +266,22 @@ fn download_update(update: tauri_plugin_updater::Update) {
                 std::process::exit(0);
             }
             Err(e) => {
-                eprintln!("[update] 下载/安装失败: {e}");
+                let msg = format!("下载/安装失败：{e}");
+                eprintln!("[update] {msg}");
+                let _ = emitter.emit(
+                    "update:progress",
+                    UpdateProgress {
+                        downloaded: 0,
+                        total: None,
+                        status: "error".into(),
+                        message: Some(msg.clone()),
+                    },
+                );
+                let _ = emitter
+                    .dialog()
+                    .message(&msg)
+                    .title("更新失败")
+                    .show(|_| {});
             }
         }
     });
@@ -386,13 +483,29 @@ pub fn run() {
                 .unwrap_or_else(|_| "http://110.42.239.85:5000".to_string());
             // 主窗口的 app handle，供 on_new_window 闭包创建子窗口用
             let app_handle = app.handle().clone();
+            // 窗口标题带版本号，方便现场确认运行的是哪个版本
+            let app_version = app.package_info().version.to_string();
+            let version_suffix = format!(" v{app_version}");
+            let main_window_title = format!("芃麦印刷{version_suffix}");
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::External(frontend_url.parse().unwrap()),
             )
-            .title("芃麦印刷")
+            .title(main_window_title)
             .inner_size(1200.0, 800.0)
+            // 远程页面若自行改 document.title，标题会被覆盖，这里统一把版本号补回来
+            .on_document_title_changed({
+                let suffix = version_suffix.clone();
+                move |window, title| {
+                    let t = if title.contains(&suffix) {
+                        title.to_string()
+                    } else {
+                        format!("{title}{suffix}")
+                    };
+                    let _ = window.set_title(&t);
+                }
+            })
             // window.open 在应用内新开窗口（预览/工作单等），不弹系统浏览器
             .on_new_window(move |url, features| {
                 let handle = app_handle.clone();

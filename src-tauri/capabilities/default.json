@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/remote-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main"],
+  "windows": ["main", "update_progress"],
   "remote": {
     "urls": [
       "http://110.42.239.85:5000",

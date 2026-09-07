@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>正在更新</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+        background: #f6f7f9;
+        color: #1f2328;
+        padding: 18px 22px;
+        user-select: none;
+      }
+      .title { font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+      .track {
+        height: 10px; border-radius: 6px; background: #e2e6ea; overflow: hidden;
+      }
+      .fill {
+        height: 100%; width: 0%;
+        background: linear-gradient(90deg, #2d7ff9, #55b3ff);
+        border-radius: 6px;
+        transition: width 0.15s ease;
+      }
+      .fill.indeterminate { width: 40%; animation: slide 1.2s ease-in-out infinite; }
+      @keyframes slide { 0% { margin-left: 0; } 50% { margin-left: 60%; } 100% { margin-left: 0; } }
+      .status { margin-top: 12px; font-size: 12px; color: #57606a; min-height: 16px; }
+    </style>
+  </head>
+  <body>
+    <div class="title">正在更新 芃麦印刷…</div>
+    <div class="track"><div id="fill" class="fill indeterminate"></div></div>
+    <div id="status" class="status">正在下载更新…</div>
+
+    <script>
+      const { listen } = window.__TAURI__.event;
+      const fill = document.getElementById("fill");
+      const statusEl = document.getElementById("status");
+
+      function fmt(b) {
+        if (b == null) return "…";
+        const m = 1024 * 1024;
+        if (b >= m) return (b / m).toFixed(1) + " MB";
+        const k = 1024;
+        if (b >= k) return (b / k).toFixed(0) + " KB";
+        return b + " B";
+      }
+
+      listen("update:progress", (e) => {
+        const p = e.payload || {};
+        const dl = p.downloaded || 0;
+        const total = p.total;
+        switch (p.status) {
+          case "installing":
+            statusEl.textContent = "下载完成，正在安装…";
+            fill.classList.remove("indeterminate");
+            fill.style.width = "100%";
+            break;
+          case "done":
+            statusEl.textContent = "更新完成，正在重启…";
+            fill.classList.remove("indeterminate");
+            fill.style.width = "100%";
+            break;
+          case "error":
+            fill.classList.remove("indeterminate");
+            statusEl.textContent = p.message || "下载失败";
+            break;
+          case "downloading":
+          default:
+            if (total) {
+              fill.classList.remove("indeterminate");
+              fill.style.width = Math.min(100, (dl / total) * 100).toFixed(1) + "%";
+              statusEl.textContent = fmt(dl) + " / " + fmt(total);
+            } else {
+              fill.classList.add("indeterminate");
+              statusEl.textContent = "已下载 " + fmt(dl);
+            }
+        }
+      });
+    </script>
+  </body>
+</html>
