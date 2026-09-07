@@ -148,7 +148,8 @@ jobs:
       - name: Download updater fragments
         uses: actions/download-artifact@v4
         with:
-          name: updater-fragments-*
+          # 注意：多 artifact 用 pattern（name 不支持通配，会按字面量找不到）
+          pattern: updater-fragments-*
           path: fragments
           merge-multiple: true
 
