@@ -7,6 +7,7 @@ use tauri::{
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_updater::UpdaterExt;
 use rdev::{listen, Event, EventType, Key};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 #[cfg(not(debug_assertions))]
 use std::time::Duration;
@@ -107,10 +108,13 @@ fn get_app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
-/// 检查是否有新版本并（如有）提示用户下载安装。
-/// `manual`：托盘手动触发时，无更新/失败会弹提示；启动时自动检查仅记日志。
-async fn check_for_updates(app: tauri::AppHandle, manual: bool) {
-    eprintln!("[update] 开始检查更新 (manual={manual})");
+/// 检查是否有新版本。
+/// `manual`：托盘手动触发时，无更新/失败会弹提示；启动自动与后台定时检测失败一律静默
+/// （可能临时没网，不打扰使用）。
+/// `periodic`：后台每 60 分钟定时检测——发现新版只发一次系统通知（用户点击才更新），
+///             同一版本在本次运行内提醒过就不再打扰。
+async fn check_for_updates(app: tauri::AppHandle, manual: bool, periodic: bool) {
+    eprintln!("[update] 检查更新 manual={manual} periodic={periodic}");
     let result = match app.updater() {
         Ok(updater) => updater.check().await.map_err(|e| e.to_string()),
         Err(e) => Err(e.to_string()),
@@ -122,7 +126,17 @@ async fn check_for_updates(app: tauri::AppHandle, manual: bool) {
                 "[update] 发现新版本 v{version}（当前 v{}）",
                 update.current_version
             );
-            prompt_update(app, update);
+            if periodic {
+                // 后台定时：仅提醒一次，点击通知才开始下载更新
+                if update_remind_once(&version) {
+                    notify_update_available(app, update);
+                } else {
+                    eprintln!("[update] v{version} 已在本次运行提醒过，跳过");
+                }
+            } else {
+                update_remind_once(&version);
+                prompt_update(app, update);
+            }
         }
         Ok(None) => {
             eprintln!("[update] 已是最新版本");
@@ -146,6 +160,64 @@ async fn check_for_updates(app: tauri::AppHandle, manual: bool) {
                     .show(|_| {});
             }
         }
+    }
+}
+
+/// 同一版本在本次运行内只提醒一次的标记。返回 `true` 表示「本次还没提醒过」。
+fn update_remind_once(version: &str) -> bool {
+    static NOTIFIED: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    let mut guard = NOTIFIED
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap();
+    if guard.as_deref() == Some(version) {
+        false
+    } else {
+        *guard = Some(version.to_string());
+        true
+    }
+}
+
+/// 后台定时检测发现新版：发一条系统通知提醒，点击通知才开始更新（Windows/Linux）。
+/// macOS 的点击回调未接入，退化为直接弹确认框。
+fn notify_update_available(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
+    let version = update.version.clone();
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    {
+        use notify_rust::Notification;
+        let mut n = Notification::new();
+        n.summary(&format!("发现新版本 v{version}"))
+            .body("点击立即更新（将自动下载并重启）")
+            .appname("pengmaitw");
+        match n.show() {
+            Ok(handle) => {
+                eprintln!("[update] 已发送「发现新版本 v{version}」通知");
+                let app2 = app.clone();
+                let ver = version;
+                std::thread::spawn(move || {
+                    // 点击后只触发一次（pending.take），避免重复点击重复下载
+                    let mut pending = Some(update);
+                    handle.wait_for_action(move |action: &str| {
+                        if action != "__closed" {
+                            if let Some(u) = pending.take() {
+                                eprintln!("[update] 用户点击更新通知，开始下载 v{ver}");
+                                let app3 = app2.clone();
+                                let _ = app2.run_on_main_thread(move || {
+                                    download_update(app3, u);
+                                });
+                            }
+                        }
+                    });
+                });
+            }
+            Err(e) => {
+                eprintln!("[update] 更新提醒通知发送失败: {e}");
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        prompt_update(app, update);
     }
 }
 
@@ -559,7 +631,7 @@ pub fn run() {
                         // 手动检查更新（有新版会弹确认框）
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            check_for_updates(app, true).await;
+                            check_for_updates(app, true, false).await;
                         });
                     }
                     "quit" => {
@@ -588,16 +660,27 @@ pub fn run() {
             // 启动全局扫码监听（窗口后台/失焦也能扫）
             start_scan_listener(app.handle().clone());
 
-            // 发布版启动约 8 秒后自动检查一次更新（有新版会弹确认框）。
+            // 发布版更新检测：
+            //   1) 启动约 8 秒后自动检查一次（有新版会弹确认框）
+            //   2) 之后每 60 分钟后台静默定时检测（有新版只发一次通知，点击才更新；失败不打扰）
             // debug 构建不做自动检查，需要时用托盘「检查更新…」手动触发。
             #[cfg(not(debug_assertions))]
             {
                 let app_handle = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_secs(8));
+                    let app_startup = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
-                        check_for_updates(app_handle, false).await;
+                        check_for_updates(app_startup, false, false).await;
                     });
+                    // 60 分钟周期定时检测
+                    loop {
+                        std::thread::sleep(Duration::from_secs(3600));
+                        let app_tick = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            check_for_updates(app_tick, false, true).await;
+                        });
+                    }
                 });
             }
 
