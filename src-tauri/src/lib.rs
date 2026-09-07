@@ -483,27 +483,21 @@ pub fn run() {
                 .unwrap_or_else(|_| "http://110.42.239.85:5000".to_string());
             // 主窗口的 app handle，供 on_new_window 闭包创建子窗口用
             let app_handle = app.handle().clone();
-            // 窗口标题带版本号，方便现场确认运行的是哪个版本
+            // 窗口标题固定为「芃麦印刷-版本号」，忽略远程页面的 document.title
             let app_version = app.package_info().version.to_string();
-            let version_suffix = format!(" v{app_version}");
-            let main_window_title = format!("芃麦印刷{version_suffix}");
+            let main_window_title = format!("芃麦印刷-{app_version}");
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::External(frontend_url.parse().unwrap()),
             )
-            .title(main_window_title)
+            .title(main_window_title.clone())
             .inner_size(1200.0, 800.0)
-            // 远程页面若自行改 document.title，标题会被覆盖，这里统一把版本号补回来
+            // 远程页面改 document.title 会试图覆盖标题，这里一律改回固定标题
             .on_document_title_changed({
-                let suffix = version_suffix.clone();
-                move |window, title| {
-                    let t = if title.contains(&suffix) {
-                        title.to_string()
-                    } else {
-                        format!("{title}{suffix}")
-                    };
-                    let _ = window.set_title(&t);
+                let fixed = main_window_title.clone();
+                move |window, _title| {
+                    let _ = window.set_title(&fixed);
                 }
             })
             // window.open 在应用内新开窗口（预览/工作单等），不弹系统浏览器
