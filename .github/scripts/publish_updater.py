@@ -19,6 +19,14 @@ import os
 import pathlib
 import sys
 
+# Windows runner 的 python stdout 默认 cp1252，打印中文会 UnicodeEncodeError；
+# 统一 UTF-8 输出（mac/linux 本来就是 UTF-8，无副作用）。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 PRODUCT = "pengmaitw"
 DEFAULT_PREFIX = f"{PRODUCT}/updates"
 
