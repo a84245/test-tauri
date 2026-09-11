@@ -1,0 +1,28 @@
+package.json
+  s_39e8cde0cefc52::t_21e30610ac7e0b 4
+src-tauri/tauri.conf.json
+  s_39e8cde0cefc52::t_c679c51977a56e 4
+src-tauri/src/lib.rs
+  s_39e8cde0cefc52::t_3f7a9f5cc098ec 40-43
+src/notify-popup.html
+  s_39e8cde0cefc52::t_6d3cad910a0731 91,94-95,107
+  s_39e8cde0cefc52::t_5479557fa3fb2c 9-11,18-20,26,38,49,60-62,70-73,76-78,84,86,103,106,110-116,118-127,132-133,151,154-167,169-170,175,177,199-201,204-211,213-229,231-239,242,249,255-260,266-279,281-296,300-306,308,313,318-319,322
+src-tauri/Cargo.toml
+  s_39e8cde0cefc52::t_0f9a2464ec1e11 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "7ef211c2535fe66b9fd223daff49fd201e0f02bd",
+  "prompts": {},
+  "sessions": {
+    "s_39e8cde0cefc52": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb34ad1e-7f1d-4311-b382-5ca2b1b780e1",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
