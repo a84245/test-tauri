@@ -9,8 +9,10 @@ fn main() {
     {
         use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
         use windows::core::HSTRING;
+        // 取自 lib.rs 的 APP_ID，与发通知时用的 appname、以及注册表/快捷方式里的
+        // AUMID 保持单一来源，避免三处不一致导致通知显示不出应用名和图标。
         let _ = unsafe {
-            SetCurrentProcessExplicitAppUserModelID(&HSTRING::from("com.dev.pengmaitw"))
+            SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(tauri_app_lib::APP_ID))
         };
     }
 

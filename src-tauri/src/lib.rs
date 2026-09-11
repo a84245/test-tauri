@@ -14,6 +14,22 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use tauri_plugin_notification::NotificationExt;
 
+/// 应用 AppUserModelID（AUMID）。
+///
+/// 必须三处完全一致，否则 Windows 无法把 Toast 归属到本应用，
+/// 通知上的「应用名」和「图标」会显示成空白/默认值：
+///   1. main.rs 的 SetCurrentProcessExplicitAppUserModelID
+///   2. tauri.conf.json 的 identifier
+///   3. 注册表 HKCU\Software\Classes\AppUserModelId\<此值> 的 DisplayName / IconUri
+///      （由 installer-hooks.nsh 在安装时写入）
+pub const APP_ID: &str = "com.dev.pengmaitw";
+
+/// 通知按钮：identifier -> 按钮文案。
+/// 前端点击后 Rust 侧 wait_for_action 会收到 identifier，
+/// 除了「忽略」以外的动作都视为「查看」，会恢复窗口并触发路由跳转。
+const ACTION_VIEW: &str = "default";
+const ACTION_IGNORE: &str = "ignore";
+
 /// 由前端调用的自定义命令：用壳（Rust）原生 API 发送系统通知。
 /// 这样绕开 Web Notification 的 HTTPS 安全上下文限制，也不经过通知插件的前端 ACL。
 /// `id` 为可选的通知标识，前端用它回查「点击后跳转的路由」。
@@ -375,12 +391,16 @@ fn send_notification(
     {
         use notify_rust::Notification;
         let mut n = Notification::new();
-        n.summary(&title).body(&body).appname("pengmaitw");
+        // appname 必须与进程级 AUMID 一致：不一致时 Windows 找不到归属，
+        // 通知上的应用名与图标会掉成空白/默认值。
+        n.summary(&title).body(&body).appname(APP_ID);
         if let Some(id) = id {
             n.id(id as u32);
         }
-        // 注册默认动作，确保点击通知体或动作按钮都能触发 "default"
-        n.action("default", "打开");
+        // 两个按钮：查看订单 / 忽略。identifier 会在点击时回传，
+        // 由下方 wait_for_action 区分（ignore 只关通知、不跳转）。
+        n.action(ACTION_VIEW, "查看订单");
+        n.action(ACTION_IGNORE, "忽略");
         match n.show() {
             Ok(handle) => {
                 let app2 = app.clone();
@@ -389,8 +409,9 @@ fn send_notification(
                     eprintln!("[notify] 等待通知点击（wait_for_action）...");
                     handle.wait_for_action(move |action: &str| {
                         eprintln!("[notify] 收到点击动作 action={action:?}");
-                        // "__closed" 表示用户直接关闭（未点击），不恢复窗口
-                        if action != "__closed" {
+                        // "__closed" = 用户直接关掉通知；"ignore" = 点了「忽略」按钮。
+                        // 两者都只关通知：不恢复窗口、不跳转路由。
+                        if action != "__closed" && action != ACTION_IGNORE {
                             // 窗口操作必须在主线程执行（Windows 下跨线程
                             // ShowWindow/SetForegroundWindow 对隐藏窗口无效）
                             let app3 = app2.clone();
