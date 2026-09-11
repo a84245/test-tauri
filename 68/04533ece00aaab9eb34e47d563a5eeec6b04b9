@@ -1,0 +1,27 @@
+.github/workflows/release.yml
+  s_bb769bb6000fc9::t_fac908b13e79d5 136-138,141
+package.json
+  s_bb769bb6000fc9::t_8fc15e1650e8f6 4
+src-tauri/Cargo.toml
+  s_bb769bb6000fc9::t_3daded8d5cdbae 3
+src-tauri/src/lib.rs
+  s_bb769bb6000fc9::t_0e93e67a13c8de 81,94-102
+src-tauri/tauri.conf.json
+  s_bb769bb6000fc9::t_1a7e44574e3638 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "6804533ece00aaab9eb34e47d563a5eeec6b04b9",
+  "prompts": {},
+  "sessions": {
+    "s_bb769bb6000fc9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_bb769bb6000fc9",
+        "model": "unknown"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
