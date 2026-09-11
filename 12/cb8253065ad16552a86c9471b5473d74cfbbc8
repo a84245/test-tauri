@@ -1,0 +1,27 @@
+package.json
+  s_6a4e6071d9d34c::t_b4c05f0fb87208 4
+src-tauri/Cargo.toml
+  s_6a4e6071d9d34c::t_2f2b19dd082080 3
+src-tauri/src/lib.rs
+  s_6a4e6071d9d34c::t_3821e66ae5fca8 58-63,124,134,200,203-205,207,730-737,739,742-752
+src-tauri/tauri.conf.json
+  s_6a4e6071d9d34c::t_de7d1482f9be24 4
+src/notify-popup.html
+  s_6a4e6071d9d34c::t_d70670403da058 9,11,14-18,24,36-37,40,43-47,51,55-56,59-62,64-68,70-73,77-78,82-85,90-91,93-148,159,161-162,168,173,184,190-218,223-227,229-240,256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "12cb8253065ad16552a86c9471b5473d74cfbbc8",
+  "prompts": {},
+  "sessions": {
+    "s_6a4e6071d9d34c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_6a4e6071d9d34c",
+        "model": "unknown"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
