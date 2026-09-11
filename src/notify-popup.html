@@ -6,22 +6,24 @@
     <title>通知</title>
     <style>
       /* ───────────────────────────────────────────────
-         自绘通知卡片：淡蓝头部 + 白底黑字内容框 + 从右侧滑入
+         自绘通知卡片：淡蓝头部 + 白底黑字多列表格 + 从右侧滑入
+         · 同一批次（data.batchNo）的通知合并到同一张卡片，追加成多行
+         · 每页 3 行，超出显示分页器
          窗口本身是「无边框 / 透明 / 置顶 / 不进任务栏」的独立窗口，
          主程序缩到托盘时也能弹。
          ─────────────────────────────────────────────── */
       :root {
         --brand: #0b49c8;
         --brand-soft: #2e6fe8;
-        --ink: #1f2328;        /* 内容文字：近黑 */
-        --ink-label: #8a94a6;  /* 字段名：灰 */
-        --line: #e3e8f0;       /* 分隔线 / 内容框边框 */
+        --ink: #1f2328;
+        --ink-label: #8a94a6;
+        --line: #e3e8f0;
       }
 
       * { box-sizing: border-box; margin: 0; padding: 0; }
 
       html, body {
-        background: transparent;   /* 窗口透明，只看得见卡片 */
+        background: transparent;
         overflow: hidden;
         user-select: none;
         -webkit-user-select: none;
@@ -33,7 +35,7 @@
       #stack {
         display: flex;
         flex-direction: column;
-        justify-content: flex-end;   /* 贴右下角；窗口向上长高 */
+        justify-content: flex-end;
         gap: 12px;
       }
 
@@ -44,8 +46,7 @@
         background: linear-gradient(150deg, #f7faff 0%, #eef4ff 45%, #e6efff 100%);
         border: 1px solid #dbe5f7;
         box-shadow: 0 14px 34px rgba(15, 45, 105, 0.16), 0 2px 8px rgba(15, 45, 105, 0.08);
-        padding: 14px 16px 14px 16px;
-        /* 从右侧滑入 */
+        padding: 14px 16px;
         transform: translateX(118%);
         opacity: 0;
         transition: transform 0.46s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.34s ease;
@@ -56,63 +57,42 @@
         transition: transform 0.32s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.3s ease;
       }
 
-      /* ── 头部：标题 + 图标 ── */
-      .head {
-        display: flex; align-items: center; gap: 9px;
-        padding-bottom: 12px;
-      }
-      .spark { flex-shrink: 0; color: var(--brand-soft); }
+      /* ── 头部 ── */
+      .head { display: flex; align-items: center; gap: 9px; padding-bottom: 12px; }
+      .spark { flex-shrink: 0; color: var(--brand-soft); animation: twinkle 2.4s ease-in-out infinite; }
       .spark svg { width: 15px; height: 15px; display: block; }
       .spark.sm svg { width: 11px; height: 11px; }
-      .spark {
-        animation: twinkle 2.4s ease-in-out infinite;
-      }
       .spark.sm { animation-delay: 0.5s; }
       @keyframes twinkle {
         0%, 100% { opacity: 0.55; transform: scale(0.92) rotate(0deg); }
         50%      { opacity: 1;    transform: scale(1.06) rotate(12deg); }
       }
-
-      .title {
-        font-size: 16px; font-weight: 700; color: var(--brand);
-        letter-spacing: 0.3px; line-height: 1.2;
+      .title { font-size: 16px; font-weight: 700; color: var(--brand); letter-spacing: 0.3px; line-height: 1.2; }
+      .count {
+        flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--brand);
+        background: rgba(11, 73, 200, 0.09); border-radius: 999px; padding: 2px 8px;
       }
-
       .close {
-        margin-left: auto;
-        width: 26px; height: 26px; flex-shrink: 0;
-        border: 0; border-radius: 8px;
-        background: transparent; color: #9aa6bb;
-        cursor: pointer;
-        display: flex; align-items: center; justify-content: center;
+        margin-left: auto; width: 26px; height: 26px; flex-shrink: 0;
+        border: 0; border-radius: 8px; background: transparent; color: #9aa6bb;
+        cursor: pointer; display: flex; align-items: center; justify-content: center;
         transition: background 0.16s ease, color 0.16s ease;
       }
       .close:hover { background: #dde7fa; color: var(--brand); }
       .close svg { width: 14px; height: 14px; }
 
-      /* ── 内容框：白底 · 黑字 · 细边框 · 多列表格 ── */
+      /* ── 内容框：白底 · 黑字 · 细边框 ── */
       .panel {
-        background: #fff;
-        border: 1px solid var(--line);
-        border-radius: 11px;
+        background: #fff; border: 1px solid var(--line); border-radius: 11px;
         padding: 12px 14px 13px;
         box-shadow: 0 1px 2px rgba(15, 45, 105, 0.04);
       }
 
-      /* 订单号：独占一行（WEB+17 位太长，塞进表格会挤坏其它列） */
-      .orderno { display: flex; align-items: baseline; gap: 10px; padding-bottom: 11px; }
-      .orderno .k { flex-shrink: 0; font-size: 12px; color: var(--ink-label); letter-spacing: 0.5px; }
-      .orderno .v {
-        font-family: ui-monospace, Consolas, "Courier New", monospace;
-        font-size: 12.5px; color: var(--ink); font-weight: 500; letter-spacing: 0.2px;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      }
-
-      /* 四列表格：客户 / 下单产品 / 下单时间 / 金额 */
+      /* 五列表格：订单号 / 客户 / 下单产品 / 下单时间 / 金额 */
       .tbl {
         display: grid;
-        grid-template-columns: 1fr 1.55fr 1.15fr 0.85fr;
-        column-gap: 10px;
+        grid-template-columns: 1.5fr 0.8fr 1.2fr 1.35fr 0.85fr;
+        column-gap: 8px;
       }
       .th {
         font-size: 11.5px; color: var(--ink-label); letter-spacing: 0.5px;
@@ -120,25 +100,37 @@
       }
       .th.right { text-align: right; }
       .td {
-        font-size: 12.5px; color: var(--ink); font-weight: 500;
-        padding-top: 8px;
+        font-size: 12.5px; color: var(--ink); font-weight: 500; padding-top: 8px;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
+      /* 订单号是 WEB+17 位，等宽字体 + 略小，避免挤掉后面的列 */
+      .td.mono { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11.5px; letter-spacing: 0; }
       .td.amount { font-size: 13.5px; font-weight: 700; text-align: right; }
 
-      /* 没有结构化数据时的兜底：直接显示正文 */
-      .fallback {
-        font-size: 13px; color: var(--ink); line-height: 1.6;
-        white-space: normal; word-break: break-word;
+      /* 没有结构化数据时的兜底 */
+      .fallback { font-size: 13px; color: var(--ink); line-height: 1.6; white-space: normal; word-break: break-word; }
+
+      /* ── 分页器（超过 3 行才出现）── */
+      .pager {
+        display: flex; align-items: center; gap: 8px;
+        margin-top: 11px; font-size: 12px; color: var(--ink-label);
       }
+      .pager button {
+        width: 22px; height: 22px; border-radius: 7px; cursor: pointer;
+        border: 1px solid var(--line); background: #fff; color: #5b6577;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+      }
+      .pager button:hover:not(:disabled) { background: #f2f6ff; border-color: #c9d7f0; color: var(--brand); }
+      .pager button:disabled { opacity: 0.35; cursor: default; }
+      .pager svg { width: 11px; height: 11px; }
+      .pager .pos { font-variant-numeric: tabular-nums; }
 
       /* ── 操作按钮 ── */
       .actions { display: flex; gap: 10px; margin-top: 13px; }
       .btn {
-        flex: 1;
-        font: inherit; font-size: 13px; font-weight: 600;
-        padding: 8px 0; border-radius: 9px;
-        cursor: pointer; border: 1px solid transparent;
+        flex: 1; font: inherit; font-size: 13px; font-weight: 600;
+        padding: 8px 0; border-radius: 9px; cursor: pointer; border: 1px solid transparent;
         transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.1s ease;
       }
       .btn:active { transform: scale(0.985); }
@@ -156,16 +148,33 @@
       const { invoke } = window.__TAURI__.core;
 
       const stack = document.getElementById("stack");
+      /** 已展示的卡片：[{ groupKey, rows: [], page, el, refs }] */
       const cards = [];
 
-      /** 四角星火花 */
+      /** 每页展示的数据行数，超过则出现分页器 */
+      const PAGE_SIZE = 3;
+      /** 最多同时存在几张卡片（不同批次各一张） */
+      const MAX_CARDS = 3;
+
+      /** 表格列定义：[表头, data 里的字段名, 额外 class] */
+      const COLUMNS = [
+        ["订单号", "orderNo", "mono"],
+        ["客户", "customer", ""],
+        ["下单产品", "product", ""],
+        ["下单时间", "time", ""],
+        ["金额", "amount", "amount"],
+      ];
+
       const SPARK = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.6c.5 3.9 1.9 6.3 4.2 7.2 1.4.6 3.1.8 6.2.8-3.1 0-4.8.2-6.2.8-2.3.9-3.7 3.3-4.2 7.2-.5-3.9-1.9-6.3-4.2-7.2-1.4-.6-3.1-.8-6.2-.8 3.1 0 4.8-.2 6.2-.8C10.1 7.9 11.5 5.5 12 1.6Z"/></svg>';
+      const CARET_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
+      const CARET_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
 
       const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
       })[c]);
+      const has = (v) => v !== undefined && v !== null && String(v).trim() !== "";
 
-      /** 窗口高度跟随内容变化（底边固定贴住屏幕右下角） */
+      /* ── 窗口高度跟随内容（底边固定贴住屏幕右下角）── */
       let resizeTimer = null;
       function syncHeight() {
         if (resizeTimer) clearTimeout(resizeTimer);
@@ -187,86 +196,130 @@
         }
       }
 
-      /**
-       * 渲染内容框：订单号独占一行，下面是四列表格（客户 / 下单产品 / 下单时间 / 金额）。
-       * 缺字段就显示「—」以保持表格形状；一个字段都没有时返回空串，
-       * 由调用方回退到纯文本正文。
-       */
-      function renderPanel(d) {
-        if (!d) return "";
-        const has = (v) => v !== undefined && v !== null && String(v).trim() !== "";
-        const cols = [
-          ["客户", d.customer, ""],
-          ["下单产品", d.product, ""],
-          ["下单时间", d.time, ""],
-          ["金额", d.amount, "amount"],
-        ];
-        if (!has(d.orderNo) && !cols.some(([, v]) => has(v))) return "";
-
-        const orderNoRow = has(d.orderNo)
-          ? `<div class="orderno"><span class="k">订单号</span><span class="v">${esc(d.orderNo)}</span></div>`
-          : "";
-        const th = cols
+      /* ── 表格渲染：表头 + 当前页的数据行 ── */
+      function tableHtml(rows, page) {
+        const th = COLUMNS
           .map(([k, , cls]) => `<div class="th${cls === "amount" ? " right" : ""}">${k}</div>`)
           .join("");
-        const td = cols
-          .map(([, v, cls]) => `<div class="td ${cls}">${esc(has(v) ? v : "—")}</div>`)
+        const slice = rows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+        const td = slice
+          .map((r) => COLUMNS
+            .map(([, key, cls]) => {
+              const v = has(r[key]) ? r[key] : "—";
+              return `<div class="td ${cls}" title="${esc(v)}">${esc(v)}</div>`;
+            })
+            .join(""))
           .join("");
-
-        return `<div class="panel">${orderNoRow}<div class="tbl">${th}${td}</div></div>`;
+        return `<div class="tbl">${th}${td}</div>`;
       }
 
-      function addCard(p) {
+      /** 重画某张卡片的表格 / 分页器 / 计数（追加行或翻页后调用） */
+      function repaint(entry) {
+        const { rows, page, refs } = entry;
+        const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+        if (page > totalPages - 1) entry.page = totalPages - 1;
+
+        if (rows.length === 0) {
+          refs.panel.innerHTML = `<div class="fallback">${esc(entry.fallback)}</div>`;
+        } else {
+          refs.panel.innerHTML = tableHtml(rows, entry.page);
+        }
+
+        refs.count.textContent = rows.length > 1 ? `${rows.length} 单` : "";
+        refs.count.style.display = rows.length > 1 ? "" : "none";
+
+        if (totalPages > 1) {
+          refs.pager.style.display = "";
+          refs.pager.querySelector(".pos").textContent = `${entry.page + 1}/${totalPages}`;
+          refs.pager.querySelector(".prev").disabled = entry.page === 0;
+          refs.pager.querySelector(".next").disabled = entry.page >= totalPages - 1;
+        } else {
+          refs.pager.style.display = "none";
+        }
+        syncHeight();
+      }
+
+      function makeCard(p) {
         const el = document.createElement("div");
         el.className = "card";
-
-        const panelHtml = renderPanel(p.data);
-        const bodyHtml = panelHtml
-          ? panelHtml
-          : (p.body ? `<div class="panel"><div class="fallback">${esc(p.body)}</div></div>` : "");
-
         el.innerHTML = `
           <div class="head">
             <span class="spark">${SPARK}</span>
             <span class="title">${esc(p.title || "新订单到了！")}</span>
+            <span class="count" style="display:none"></span>
             <span class="spark sm">${SPARK}</span>
             <button class="close" title="关闭">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
             </button>
           </div>
-          ${bodyHtml}
+          <div class="panel"></div>
+          <div class="pager" style="display:none">
+            <button class="prev" title="上一页">${CARET_L}</button>
+            <span class="pos"></span>
+            <button class="next" title="下一页">${CARET_R}</button>
+          </div>
           <div class="actions">
             ${p.path ? '<button class="btn btn-primary" data-act="view">查看订单</button>' : ""}
             <button class="btn btn-ghost" data-act="ignore">忽略</button>
           </div>
         `;
+        return el;
+      }
 
-        const entry = { id: p.id, el };
+      function addOrMerge(p) {
+        // 同一批次（batchNo 相同）合并进已有卡片，追加一行
+        const key = p.data && has(p.data.batchNo) ? String(p.data.batchNo) : null;
+        let entry = key ? cards.find((c) => c.groupKey === key) : null;
+
+        if (entry) {
+          entry.rows.push(p.data || {});
+          entry.page = Math.ceil(entry.rows.length / PAGE_SIZE) - 1;   // 自动翻到最后一页看新单
+          repaint(entry);
+          return;
+        }
+
+        while (cards.length >= MAX_CARDS) removeCard(cards[0], false);
+
+        const el = makeCard(p);
+        entry = {
+          id: p.id,
+          groupKey: key,
+          rows: p.data ? [p.data] : [],
+          fallback: p.body || "",
+          page: 0,
+          el,
+          refs: {
+            panel: el.querySelector(".panel"),
+            pager: el.querySelector(".pager"),
+            count: el.querySelector(".count"),
+          },
+        };
         cards.push(entry);
         stack.appendChild(el);
 
-        requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("show")));
-
+        entry.refs.pager.querySelector(".prev").addEventListener("click", () => {
+          if (entry.page > 0) { entry.page -= 1; repaint(entry); }
+        });
+        entry.refs.pager.querySelector(".next").addEventListener("click", () => {
+          const total = Math.ceil(entry.rows.length / PAGE_SIZE);
+          if (entry.page < total - 1) { entry.page += 1; repaint(entry); }
+        });
         el.querySelector(".close").addEventListener("click", () => {
-          invoke("notify_popup_action", { id: p.id ?? null, action: "ignore" }).catch(() => {});
+          invoke("notify_popup_action", { id: entry.id ?? null, action: "ignore" }).catch(() => {});
           removeCard(entry);
         });
         el.querySelectorAll("[data-act]").forEach((b) => {
           b.addEventListener("click", () => {
-            invoke("notify_popup_action", { id: p.id ?? null, action: b.getAttribute("data-act") }).catch(() => {});
+            invoke("notify_popup_action", { id: entry.id ?? null, action: b.getAttribute("data-act") }).catch(() => {});
             removeCard(entry);
           });
         });
 
-        syncHeight();
+        repaint(entry);
+        requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("show")));
       }
 
-      const MAX_CARDS = 5;
-      listen("notify:show", (e) => {
-        const p = e.payload || {};
-        while (cards.length >= MAX_CARDS) removeCard(cards[0], false);
-        addCard(p);
-      });
+      listen("notify:show", (e) => addOrMerge(e.payload || {}));
     </script>
   </body>
 </html>

@@ -37,8 +37,10 @@ const ACTION_IGNORE: &str = "ignore";
 
 /// 通知卡片窗口的 label（对应 src/notify-popup.html）
 const NOTIFY_POPUP_LABEL: &str = "notify_popup";
-/// 卡片窗口宽度（逻辑像素；高度随内容动态变化）
-const NOTIFY_POPUP_WIDTH: f64 = 460.0;
+/// 卡片窗口宽度（逻辑像素；高度随内容动态变化）。
+/// 需要放下「订单号 / 客户 / 下单产品 / 下单时间 / 金额」五列表格，
+/// 订单号是 WEB+17 位（19 字符），太窄会把它挤成省略号。
+const NOTIFY_POPUP_WIDTH: f64 = 600.0;
 /// 距屏幕右下角的留白
 const NOTIFY_POPUP_MARGIN: f64 = 16.0;
 
