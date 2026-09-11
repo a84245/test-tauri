@@ -6,22 +6,22 @@
     <title>通知</title>
     <style>
       /* ───────────────────────────────────────────────
-         自绘通知卡片：长矩形 + 蓝色系 + 从右侧滑入
+         自绘通知卡片：淡蓝头部 + 白底黑字内容框 + 从右侧滑入
          窗口本身是「无边框 / 透明 / 置顶 / 不进任务栏」的独立窗口，
-         所以这张卡片在主程序缩到托盘时也能照常弹出。
+         主程序缩到托盘时也能弹。
          ─────────────────────────────────────────────── */
       :root {
-        --blue-1: #0b49c8;
-        --blue-2: #1a66f0;
-        --blue-3: #2e86ff;
-        --gold: #ffd666;
-        --ok: #34d399;
+        --brand: #0b49c8;
+        --brand-soft: #2e6fe8;
+        --ink: #1f2328;        /* 内容文字：近黑 */
+        --ink-label: #8a94a6;  /* 字段名：灰 */
+        --line: #e3e8f0;       /* 分隔线 / 内容框边框 */
       }
 
       * { box-sizing: border-box; margin: 0; padding: 0; }
 
       html, body {
-        background: transparent;   /* 关键：窗口透明，只看得见卡片本身 */
+        background: transparent;   /* 窗口透明，只看得见卡片 */
         overflow: hidden;
         user-select: none;
         -webkit-user-select: none;
@@ -33,117 +33,119 @@
       #stack {
         display: flex;
         flex-direction: column;
-        justify-content: flex-end;   /* 靠下对齐：窗口向上长高，卡片贴着右下角 */
-        gap: 10px;
+        justify-content: flex-end;   /* 贴右下角；窗口向上长高 */
+        gap: 12px;
       }
 
-      /* ── 卡片本体 ── */
+      /* ── 卡片 ── */
       .card {
         position: relative;
-        display: flex;
-        align-items: flex-start;
-        gap: 12px;
-        padding: 13px 14px 12px 12px;
-        border-radius: 14px;
-        background: linear-gradient(135deg, var(--blue-1) 0%, var(--blue-2) 55%, var(--blue-3) 100%);
-        box-shadow: 0 12px 32px rgba(3, 32, 84, 0.34), 0 2px 6px rgba(3, 32, 84, 0.22);
-        color: #fff;
-        overflow: hidden;
+        border-radius: 16px;
+        background: linear-gradient(150deg, #f7faff 0%, #eef4ff 45%, #e6efff 100%);
+        border: 1px solid #dbe5f7;
+        box-shadow: 0 14px 34px rgba(15, 45, 105, 0.16), 0 2px 8px rgba(15, 45, 105, 0.08);
+        padding: 14px 16px 14px 16px;
         /* 从右侧滑入 */
         transform: translateX(118%);
         opacity: 0;
-        transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+        transition: transform 0.46s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.34s ease;
       }
       .card.show { transform: translateX(0); opacity: 1; }
       .card.leaving {
-        transform: translateX(118%);
-        opacity: 0;
-        transition: transform 0.3s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.28s ease;
+        transform: translateX(118%); opacity: 0;
+        transition: transform 0.32s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.3s ease;
       }
 
-      /* 卡片高光：左上角一层很淡的白，让纯色不那么平 */
-      .card::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: radial-gradient(120% 140% at 0% 0%, rgba(255, 255, 255, 0.16), transparent 55%);
-        pointer-events: none;
+      /* ── 头部：标题 + 图标 ── */
+      .head {
+        display: flex; align-items: center; gap: 9px;
+        padding-bottom: 12px;
       }
-
-      /* 左侧品牌竖条 */
-      .card::after {
-        content: "";
-        position: absolute;
-        left: 0; top: 0; bottom: 0;
-        width: 3px;
-        background: rgba(255, 255, 255, 0.92);
-        pointer-events: none;
+      .spark { flex-shrink: 0; color: var(--brand-soft); }
+      .spark svg { width: 15px; height: 15px; display: block; }
+      .spark.sm svg { width: 11px; height: 11px; }
+      .spark {
+        animation: twinkle 2.4s ease-in-out infinite;
       }
-
-      .icon {
-        flex-shrink: 0;
-        width: 38px; height: 38px;
-        border-radius: 11px;
-        display: flex; align-items: center; justify-content: center;
-        background: rgba(255, 255, 255, 0.18);
-        border: 1px solid rgba(255, 255, 255, 0.22);
-        backdrop-filter: blur(2px);
+      .spark.sm { animation-delay: 0.5s; }
+      @keyframes twinkle {
+        0%, 100% { opacity: 0.55; transform: scale(0.92) rotate(0deg); }
+        50%      { opacity: 1;    transform: scale(1.06) rotate(12deg); }
       }
-      .icon svg { width: 19px; height: 19px; }
-
-      .body { flex: 1; min-width: 0; padding-top: 1px; }
 
       .title {
-        font-size: 14.5px; font-weight: 600; letter-spacing: 0.2px;
-        line-height: 1.25;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        font-size: 16px; font-weight: 700; color: var(--brand);
+        letter-spacing: 0.3px; line-height: 1.2;
       }
-      .sub {
-        margin-top: 3px;
-        font-size: 12.5px; line-height: 1.4;
-        color: rgba(255, 255, 255, 0.74);
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      }
-      .meta {
-        margin-top: 5px;
-        display: flex; align-items: center; flex-wrap: wrap;
-        gap: 6px;
-        font-size: 12.5px; color: rgba(255, 255, 255, 0.92);
-      }
-      .meta .amount { color: var(--gold); font-weight: 700; }
-      .meta .dot { color: rgba(255, 255, 255, 0.4); }
-
-      .actions { display: flex; gap: 8px; margin-top: 10px; }
-      .btn {
-        font: inherit; font-size: 12.5px; font-weight: 600;
-        padding: 5px 13px; border-radius: 8px;
-        cursor: pointer; border: 1px solid transparent;
-        transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.1s ease;
-      }
-      .btn:active { transform: scale(0.97); }
-      .btn-primary { background: #fff; color: var(--blue-1); }
-      .btn-primary:hover { background: #eef4ff; }
-      .btn-ghost {
-        background: rgba(255, 255, 255, 0.14);
-        color: #fff;
-        border-color: rgba(255, 255, 255, 0.26);
-      }
-      .btn-ghost:hover { background: rgba(255, 255, 255, 0.24); }
 
       .close {
-        flex-shrink: 0;
-        width: 24px; height: 24px; margin: -3px -3px 0 0;
-        border: 0; border-radius: 7px;
-        background: transparent; color: rgba(255, 255, 255, 0.72);
+        margin-left: auto;
+        width: 26px; height: 26px; flex-shrink: 0;
+        border: 0; border-radius: 8px;
+        background: transparent; color: #9aa6bb;
         cursor: pointer;
         display: flex; align-items: center; justify-content: center;
         transition: background 0.16s ease, color 0.16s ease;
       }
-      .close:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
-      .close svg { width: 13px; height: 13px; }
+      .close:hover { background: #dde7fa; color: var(--brand); }
+      .close svg { width: 14px; height: 14px; }
 
-      /* 同一时刻只允许一条在播放入场动画，避免一次来多条时乱跳 */
-      .card.show { animation: none; }
+      /* ── 内容框：白底 · 黑字 · 细边框 · 多列表格 ── */
+      .panel {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        padding: 12px 14px 13px;
+        box-shadow: 0 1px 2px rgba(15, 45, 105, 0.04);
+      }
+
+      /* 订单号：独占一行（WEB+17 位太长，塞进表格会挤坏其它列） */
+      .orderno { display: flex; align-items: baseline; gap: 10px; padding-bottom: 11px; }
+      .orderno .k { flex-shrink: 0; font-size: 12px; color: var(--ink-label); letter-spacing: 0.5px; }
+      .orderno .v {
+        font-family: ui-monospace, Consolas, "Courier New", monospace;
+        font-size: 12.5px; color: var(--ink); font-weight: 500; letter-spacing: 0.2px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+
+      /* 四列表格：客户 / 下单产品 / 下单时间 / 金额 */
+      .tbl {
+        display: grid;
+        grid-template-columns: 1fr 1.55fr 1.15fr 0.85fr;
+        column-gap: 10px;
+      }
+      .th {
+        font-size: 11.5px; color: var(--ink-label); letter-spacing: 0.5px;
+        padding-bottom: 6px; border-bottom: 1px solid var(--line);
+      }
+      .th.right { text-align: right; }
+      .td {
+        font-size: 12.5px; color: var(--ink); font-weight: 500;
+        padding-top: 8px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .td.amount { font-size: 13.5px; font-weight: 700; text-align: right; }
+
+      /* 没有结构化数据时的兜底：直接显示正文 */
+      .fallback {
+        font-size: 13px; color: var(--ink); line-height: 1.6;
+        white-space: normal; word-break: break-word;
+      }
+
+      /* ── 操作按钮 ── */
+      .actions { display: flex; gap: 10px; margin-top: 13px; }
+      .btn {
+        flex: 1;
+        font: inherit; font-size: 13px; font-weight: 600;
+        padding: 8px 0; border-radius: 9px;
+        cursor: pointer; border: 1px solid transparent;
+        transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.1s ease;
+      }
+      .btn:active { transform: scale(0.985); }
+      .btn-primary { background: var(--brand); color: #fff; }
+      .btn-primary:hover { background: #0a41b4; }
+      .btn-ghost { background: #fff; color: #5b6577; border-color: var(--line); }
+      .btn-ghost:hover { background: #f5f8ff; border-color: #c9d7f0; color: var(--brand); }
     </style>
   </head>
   <body>
@@ -154,29 +156,21 @@
       const { invoke } = window.__TAURI__.core;
 
       const stack = document.getElementById("stack");
-      const cards = [];   // [{ id, el }]
+      const cards = [];
 
-      const ICONS = {
-        // 订单：购物袋
-        order: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>',
-        // 通用提示：铃铛
-        info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
-        // 错误：惊叹号
-        error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>',
-      };
+      /** 四角星火花 */
+      const SPARK = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.6c.5 3.9 1.9 6.3 4.2 7.2 1.4.6 3.1.8 6.2.8-3.1 0-4.8.2-6.2.8-2.3.9-3.7 3.3-4.2 7.2-.5-3.9-1.9-6.3-4.2-7.2-1.4-.6-3.1-.8-6.2-.8 3.1 0 4.8-.2 6.2-.8C10.1 7.9 11.5 5.5 12 1.6Z"/></svg>';
 
       const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
       })[c]);
 
-      /** 通知窗口高度跟随内容变化：窗口向上长高，底边固定贴住屏幕右下角 */
+      /** 窗口高度跟随内容变化（底边固定贴住屏幕右下角） */
       let resizeTimer = null;
       function syncHeight() {
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
-          const h = Math.ceil(document.body.scrollHeight);
-          invoke("notify_popup_resize", { height: h }).catch(() => {});
-          // 没有卡片了就收起窗口
+          invoke("notify_popup_resize", { height: Math.ceil(document.body.scrollHeight) }).catch(() => {});
           if (cards.length === 0) invoke("notify_popup_hide").catch(() => {});
         }, 30);
       }
@@ -187,51 +181,79 @@
         cards.splice(i, 1);
         if (animate) {
           entry.el.classList.add("leaving");
-          setTimeout(() => { entry.el.remove(); syncHeight(); }, 320);
+          setTimeout(() => { entry.el.remove(); syncHeight(); }, 330);
         } else {
           entry.el.remove();
         }
       }
 
+      /**
+       * 渲染内容框：订单号独占一行，下面是四列表格（客户 / 下单产品 / 下单时间 / 金额）。
+       * 缺字段就显示「—」以保持表格形状；一个字段都没有时返回空串，
+       * 由调用方回退到纯文本正文。
+       */
+      function renderPanel(d) {
+        if (!d) return "";
+        const has = (v) => v !== undefined && v !== null && String(v).trim() !== "";
+        const cols = [
+          ["客户", d.customer, ""],
+          ["下单产品", d.product, ""],
+          ["下单时间", d.time, ""],
+          ["金额", d.amount, "amount"],
+        ];
+        if (!has(d.orderNo) && !cols.some(([, v]) => has(v))) return "";
+
+        const orderNoRow = has(d.orderNo)
+          ? `<div class="orderno"><span class="k">订单号</span><span class="v">${esc(d.orderNo)}</span></div>`
+          : "";
+        const th = cols
+          .map(([k, , cls]) => `<div class="th${cls === "amount" ? " right" : ""}">${k}</div>`)
+          .join("");
+        const td = cols
+          .map(([, v, cls]) => `<div class="td ${cls}">${esc(has(v) ? v : "—")}</div>`)
+          .join("");
+
+        return `<div class="panel">${orderNoRow}<div class="tbl">${th}${td}</div></div>`;
+      }
+
       function addCard(p) {
         const el = document.createElement("div");
         el.className = "card";
-        const kind = ICONS[p.kind] ? p.kind : "order";
 
-        // 正文：第一行做标题，其余拆成「副标题 + 明细」
-        const bodyText = String(p.body ?? "");
+        const panelHtml = renderPanel(p.data);
+        const bodyHtml = panelHtml
+          ? panelHtml
+          : (p.body ? `<div class="panel"><div class="fallback">${esc(p.body)}</div></div>` : "");
+
         el.innerHTML = `
-          <div class="icon">${ICONS[kind]}</div>
-          <div class="body">
-            <div class="title">${esc(p.title || "新通知")}</div>
-            ${bodyText ? `<div class="sub">${esc(bodyText)}</div>` : ""}
-            ${p.extra ? `<div class="meta">${esc(p.extra)}</div>` : ""}
-            <div class="actions">
-              ${p.path ? '<button class="btn btn-primary" data-act="view">查看订单</button>' : ""}
-              <button class="btn btn-ghost" data-act="ignore">忽略</button>
-            </div>
+          <div class="head">
+            <span class="spark">${SPARK}</span>
+            <span class="title">${esc(p.title || "新订单到了！")}</span>
+            <span class="spark sm">${SPARK}</span>
+            <button class="close" title="关闭">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
           </div>
-          <button class="close" title="关闭">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-          </button>
+          ${bodyHtml}
+          <div class="actions">
+            ${p.path ? '<button class="btn btn-primary" data-act="view">查看订单</button>' : ""}
+            <button class="btn btn-ghost" data-act="ignore">忽略</button>
+          </div>
         `;
 
         const entry = { id: p.id, el };
         cards.push(entry);
         stack.appendChild(el);
 
-        // 下一帧再加 show，保证过渡动画能触发
         requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("show")));
 
         el.querySelector(".close").addEventListener("click", () => {
           invoke("notify_popup_action", { id: p.id ?? null, action: "ignore" }).catch(() => {});
           removeCard(entry);
         });
-
         el.querySelectorAll("[data-act]").forEach((b) => {
           b.addEventListener("click", () => {
-            const action = b.getAttribute("data-act");
-            invoke("notify_popup_action", { id: p.id ?? null, action }).catch(() => {});
+            invoke("notify_popup_action", { id: p.id ?? null, action: b.getAttribute("data-act") }).catch(() => {});
             removeCard(entry);
           });
         });
@@ -239,7 +261,6 @@
         syncHeight();
       }
 
-      // 上限 5 条，超出丢弃最旧的，避免刷屏时堆满屏幕
       const MAX_CARDS = 5;
       listen("notify:show", (e) => {
         const p = e.payload || {};

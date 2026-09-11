@@ -55,6 +55,12 @@ struct NotifyPopupPayload {
     /// 有跳转目标时才显示「查看订单」按钮
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<String>,
+    /// 结构化订单信息（orderNo / customer / product / time / amount），
+    /// 由前端原样透传，卡片按这些字段渲染成多列表格。
+    /// 这里用 Value 而不定义结构体：字段由业务侧决定，壳只负责转发，
+    /// 以后加字段不用改 exe 再发一版。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<serde_json::Value>,
 }
 
 /// 计算卡片窗口位置：贴住主显示器工作区（work_area 已排除任务栏）的右下角。
@@ -115,6 +121,7 @@ fn show_notify_popup(
     title: String,
     body: String,
     id: Option<i32>,
+    data: Option<serde_json::Value>,
 ) -> Result<(), String> {
     let win = ensure_notify_popup(app).ok_or_else(|| "通知窗口创建失败".to_string())?;
 
@@ -124,6 +131,7 @@ fn show_notify_popup(
         body,
         kind: "order".into(),
         path: Some("/orders".into()),
+        data,
     };
     win.emit("notify:show", payload).map_err(|e| e.to_string())?;
 
@@ -189,12 +197,14 @@ fn notify(
     title: String,
     body: Option<String>,
     id: Option<i32>,
+    data: Option<serde_json::Value>,
 ) -> Result<(), String> {
     eprintln!(
-        "[notify] 收到前端通知请求 title={title:?} body={:?} id={id:?}",
-        body.as_deref().unwrap_or("")
+        "[notify] 收到前端通知请求 title={title:?} body={:?} id={id:?} data={:?}",
+        body.as_deref().unwrap_or(""),
+        data.as_ref().map(|v| v.to_string()).unwrap_or_default()
     );
-    show_notify_popup(&app, title, body.unwrap_or_default(), id)
+    show_notify_popup(&app, title, body.unwrap_or_default(), id, data)
 }
 
 /// 通知点击动作事件载荷，前端据此恢复窗口并跳转路由。
@@ -717,14 +727,29 @@ pub fn run() {
             // tauri-plugin-notification 的 Windows COM 激活器将使用正确的 AUMID
             // 进行注册，确保 Toast 通知点击能正确回传到本进程。
 
-            // 启动时清理 WebView2 缓存，避免加载失败响应(404)被缓存导致白屏/404
-            // 必须在创建窗口(WebView)之前执行，否则缓存目录被占用删不掉
+            // 启动时清理 WebView2 的 HTTP 缓存，避免加载失败响应(404)被缓存导致白屏。
+            // 必须在创建窗口(WebView)之前执行，否则目录被占用删不掉。
+            //
+            // ⚠️ 只能删「纯缓存」子目录：EBWebView 整个目录里同时放着
+            // Default/Local Storage（登录态 auth_state 就存这里）、IndexedDB、
+            // Network/Cookies 等持久数据。以前是整个目录 remove_dir_all，
+            // 结果每次启动都把登录态一起清掉——登录页默认勾选的
+            // 「记住登录（30 天）」因此从未真正生效过，每次开机都要重新登录。
             if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
-                let cache_dir = std::path::Path::new(&appdata)
+                let webview_dir = std::path::Path::new(&appdata)
                     .join("com.dev.pengmaitw")
                     .join("EBWebView");
-                if cache_dir.exists() {
-                    let _ = std::fs::remove_dir_all(&cache_dir);
+                // 这些目录删掉只会让下次加载慢一点，不会丢任何用户数据
+                const CACHE_SUBDIRS: [&str; 3] = [
+                    "Default/Cache",
+                    "Default/Code Cache",
+                    "Default/GPUCache",
+                ];
+                for sub in CACHE_SUBDIRS {
+                    let dir = webview_dir.join(sub);
+                    if dir.exists() {
+                        let _ = std::fs::remove_dir_all(&dir);
+                    }
                 }
             }
 
