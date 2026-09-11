@@ -78,7 +78,7 @@ fn ensure_notify_popup(app: &tauri::AppHandle) -> Option<WebviewWindow> {
     if let Some(w) = app.get_webview_window(NOTIFY_POPUP_LABEL) {
         return Some(w);
     }
-    match tauri::WebviewWindowBuilder::new(
+    let builder = tauri::WebviewWindowBuilder::new(
         app,
         NOTIFY_POPUP_LABEL,
         WebviewUrl::App("notify-popup.html".into()),
@@ -87,14 +87,19 @@ fn ensure_notify_popup(app: &tauri::AppHandle) -> Option<WebviewWindow> {
     .inner_size(NOTIFY_POPUP_WIDTH, 180.0)
     .resizable(false)
     .decorations(false)
-    .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
     .shadow(false)
     .focused(false)
-    .visible(false)
-    .build()
-    {
+    .visible(false);
+
+    // transparent() 在 macOS 上被 #[cfg(any(not(target_os = "macos"), feature = "macos-private-api"))]
+    // 门控（需要私有 API，仅 App Store 之外的分发可用），release 构建下未开该特性会直接编译失败。
+    // 这里只在非 macOS 开启透明；macOS 退化为不透明窗口，卡片功能不受影响。
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    match builder.build() {
         Ok(w) => Some(w),
         Err(e) => {
             eprintln!("[notify-popup] 窗口创建失败: {e}");

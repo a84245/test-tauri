@@ -133,8 +133,12 @@ jobs:
             src-tauri/target/release/bundle/**/*.sig
 
   # 汇总各平台片段 → latest.json → 上传 MinIO
+  # if: always() —— 任一平台（常见是 macOS）挂掉时，manifest 仍要执行：
+  # 否则 latest.json 不更新，Windows/Linux 的包明明已经传上去了，
+  # 所有客户端却一个都收不到更新（v0.3.6 / v0.3.7 连续踩过两次）。
   manifest:
     needs: build
+    if: always() && needs.build.result != 'cancelled'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
