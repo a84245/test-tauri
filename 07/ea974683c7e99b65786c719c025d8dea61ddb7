@@ -1,0 +1,31 @@
+src-tauri/src/main.rs
+  s_39e8cde0cefc52::t_c543b24983f9a7 12-13,15
+src-tauri/src/lib.rs
+  s_39e8cde0cefc52::t_1bc8d25ef84e82 17-32
+  s_39e8cde0cefc52::t_c41e1b263a66f0 394-396,400-403
+  s_39e8cde0cefc52::t_af3cb7dc65039b 412-414
+src-tauri/Cargo.toml
+  s_39e8cde0cefc52::t_37a869ac361644 3
+package.json
+  s_39e8cde0cefc52::t_dbfc25a517df20 4
+src-tauri/installer-hooks.nsh
+  s_39e8cde0cefc52::t_89b91a1777e226 30,36-52
+src-tauri/tauri.conf.json
+  s_39e8cde0cefc52::t_571d49643a820d 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "07ea974683c7e99b65786c719c025d8dea61ddb7",
+  "prompts": {},
+  "sessions": {
+    "s_39e8cde0cefc52": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb34ad1e-7f1d-4311-b382-5ca2b1b780e1",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
