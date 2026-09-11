@@ -9,6 +9,10 @@ fn main() {
                 "notify",
                 "open_local_folder",
                 "get_app_version",
+                // 自绘通知卡片窗口（notify-popup.html）用到的三个命令
+                "notify_popup_resize",
+                "notify_popup_hide",
+                "notify_popup_action",
             ]),
         ),
     )

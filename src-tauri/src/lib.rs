@@ -1,6 +1,6 @@
 #[allow(unused_imports)]
 use tauri::{
-    Emitter, Manager, WindowEvent,
+    Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow, WindowEvent,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
@@ -30,8 +30,153 @@ pub const APP_ID: &str = "com.dev.pengmaitw";
 const ACTION_VIEW: &str = "default";
 const ACTION_IGNORE: &str = "ignore";
 
-/// 由前端调用的自定义命令：用壳（Rust）原生 API 发送系统通知。
-/// 这样绕开 Web Notification 的 HTTPS 安全上下文限制，也不经过通知插件的前端 ACL。
+// ─────────────────────────── 自绘通知卡片窗口 ───────────────────────────
+// 系统 toast 的外观由 Windows 绘制、应用改不了，所以改成自己开一个
+// 无边框透明小窗，用本地 notify-popup.html 画卡片；主程序缩到托盘时
+// 这个窗口依然存在，所以后台也能弹。
+
+/// 通知卡片窗口的 label（对应 src/notify-popup.html）
+const NOTIFY_POPUP_LABEL: &str = "notify_popup";
+/// 卡片窗口宽度（逻辑像素；高度随内容动态变化）
+const NOTIFY_POPUP_WIDTH: f64 = 460.0;
+/// 距屏幕右下角的留白
+const NOTIFY_POPUP_MARGIN: f64 = 16.0;
+
+/// 发给通知卡片窗口的载荷。
+#[derive(Clone, serde::Serialize)]
+struct NotifyPopupPayload {
+    /// 通知 id：点击「查看订单」时原样回传，前端据此查路由
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<i32>,
+    title: String,
+    body: String,
+    /// 卡片图标类型：order / info / error
+    kind: String,
+    /// 有跳转目标时才显示「查看订单」按钮
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+}
+
+/// 计算卡片窗口位置：贴住主显示器工作区（work_area 已排除任务栏）的右下角。
+/// 窗口尺寸是逻辑像素，work_area 是物理像素，这里统一换算成逻辑像素。
+fn notify_popup_position(win: &WebviewWindow, height: f64) -> Option<(f64, f64)> {
+    let monitor = win.primary_monitor().ok().flatten()?;
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let area_x = area.position.x as f64 / scale;
+    let area_y = area.position.y as f64 / scale;
+    let area_w = area.size.width as f64 / scale;
+    let area_h = area.size.height as f64 / scale;
+    let x = area_x + area_w - NOTIFY_POPUP_WIDTH - NOTIFY_POPUP_MARGIN;
+    let y = area_y + area_h - height - NOTIFY_POPUP_MARGIN;
+    Some((x, y))
+}
+
+/// 取得（必要时创建）通知卡片窗口。窗口透明、无边框、置顶、不进任务栏、
+/// 且 `.focused(false)`——弹通知时不抢焦点，不打断用户正在做的事。
+fn ensure_notify_popup(app: &tauri::AppHandle) -> Option<WebviewWindow> {
+    if let Some(w) = app.get_webview_window(NOTIFY_POPUP_LABEL) {
+        return Some(w);
+    }
+    match tauri::WebviewWindowBuilder::new(
+        app,
+        NOTIFY_POPUP_LABEL,
+        WebviewUrl::App("notify-popup.html".into()),
+    )
+    .title("通知")
+    .inner_size(NOTIFY_POPUP_WIDTH, 180.0)
+    .resizable(false)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .shadow(false)
+    .focused(false)
+    .visible(false)
+    .build()
+    {
+        Ok(w) => Some(w),
+        Err(e) => {
+            eprintln!("[notify-popup] 窗口创建失败: {e}");
+            None
+        }
+    }
+}
+
+/// 在屏幕右下角弹出一条自绘通知卡片。
+/// 卡片常驻、不自动消失，直到用户点「忽略」/「查看订单」/ ✕。
+fn show_notify_popup(
+    app: &tauri::AppHandle,
+    title: String,
+    body: String,
+    id: Option<i32>,
+) -> Result<(), String> {
+    let win = ensure_notify_popup(app).ok_or_else(|| "通知窗口创建失败".to_string())?;
+
+    let payload = NotifyPopupPayload {
+        id,
+        title,
+        body,
+        kind: "order".into(),
+        path: Some("/orders".into()),
+    };
+    win.emit("notify:show", payload).map_err(|e| e.to_string())?;
+
+    // 先按当前高度摆好位置再显示，避免在高处闪一下再跳
+    let h = win
+        .outer_size()
+        .map(|s| s.height as f64 / win.scale_factor().unwrap_or(1.0))
+        .unwrap_or(180.0);
+    if let Some((x, y)) = notify_popup_position(&win, h) {
+        let _ = win.set_position(LogicalPosition::new(x, y));
+    }
+    win.show().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 卡片内容高度变化 → 同步窗口尺寸并重新贴住右下角（底边固定不动）。
+#[tauri::command]
+fn notify_popup_resize(app: tauri::AppHandle, height: f64) {
+    let Some(win) = app.get_webview_window(NOTIFY_POPUP_LABEL) else {
+        return;
+    };
+    let h = height.clamp(60.0, 2000.0);
+    let _ = win.set_size(LogicalSize::new(NOTIFY_POPUP_WIDTH, h));
+    if let Some((x, y)) = notify_popup_position(&win, h) {
+        let _ = win.set_position(LogicalPosition::new(x, y));
+    }
+}
+
+/// 卡片全部关完 → 收起窗口（进程仍在托盘运行，主窗口不受影响）。
+#[tauri::command]
+fn notify_popup_hide(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window(NOTIFY_POPUP_LABEL) {
+        let _ = win.hide();
+    }
+}
+
+/// 卡片按钮点击：
+/// - view：唤起并聚焦主窗口，再让前端按 id 做路由跳转（复用现有链路）
+/// - 其它（忽略 / 关闭）：什么都不做，卡片由前端自己移除
+#[tauri::command]
+fn notify_popup_action(app: tauri::AppHandle, id: Option<i32>, action: String) {
+    if action != "view" {
+        eprintln!("[notify-popup] 忽略通知 id={id:?}");
+        return;
+    }
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+    let payload = NotificationAction {
+        id: id.map(|i| i as u32),
+    };
+    let _ = app.emit("notification:action", payload);
+}
+
+/// 由前端调用的自定义命令：在屏幕右下角弹出自绘通知卡片。
+/// 前端仍是原来的 `invoke('notify', {title, body, id})`，壳内部换实现即可。
 /// `id` 为可选的通知标识，前端用它回查「点击后跳转的路由」。
 #[tauri::command]
 fn notify(
@@ -44,7 +189,7 @@ fn notify(
         "[notify] 收到前端通知请求 title={title:?} body={:?} id={id:?}",
         body.as_deref().unwrap_or("")
     );
-    send_notification(&app, title, body.unwrap_or_default(), id)
+    show_notify_popup(&app, title, body.unwrap_or_default(), id)
 }
 
 /// 通知点击动作事件载荷，前端据此恢复窗口并跳转路由。
@@ -375,12 +520,18 @@ fn download_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) 
     });
 }
 
-/// 发送系统通知。
+/// 发送【系统】通知（Windows toast）。
+///
+/// 目前 notify 命令已改为弹自绘卡片（见 show_notify_popup），本函数保留备用：
+/// 系统通知的优势是能进 Windows 通知中心，人不在电脑前时回来还能看到。
+/// 若以后想恢复「前台弹卡片 / 后台发系统通知」的双通道，直接重新调用它即可。
+///
 /// Linux / Windows：走 notify-rust 并阻塞等待点击动作，回调中直接恢复窗口 +
 /// emit notification:action 事件给前端做路由跳转。这样可以绕开
 /// tauri-plugin-notification 在 Linux 桌面端丢弃 NotificationHandle、
 /// 以及在 Windows 上 COM 激活注册可能失败导致 onAction 不触发的问题。
 /// macOS：走 tauri-plugin-notification（该平台行为稳定）。
+#[allow(dead_code)]
 fn send_notification(
     app: &tauri::AppHandle,
     title: String,
@@ -523,7 +674,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             notify,
             open_local_folder,
-            get_app_version
+            get_app_version,
+            notify_popup_resize,
+            notify_popup_hide,
+            notify_popup_action
         ])
         .on_window_event(|window, event| {
             // 拦截主窗口关闭：弹原生对话框，询问「后台挂起」或「退出程序」
@@ -704,6 +858,11 @@ pub fn run() {
                     }
                 });
             }
+
+            // 预创建通知卡片窗口（隐藏状态）：等到第一次来通知才建的话，
+            // WebView 初始化会让卡片延迟几百毫秒才出现；提前建好，通知来时
+            // 直接 show() 就能秒出。
+            let _ = ensure_notify_popup(app.handle());
 
             Ok(())
         })
