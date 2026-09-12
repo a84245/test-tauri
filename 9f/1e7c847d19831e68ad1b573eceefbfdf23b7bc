@@ -1,0 +1,20 @@
+src-tauri/src/lib.rs
+  s_39e8cde0cefc52::t_9d12b4e40c4fa9 686-710
+  s_39e8cde0cefc52::t_b7ba187bd96cc0 722-723
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9f1e7c847d19831e68ad1b573eceefbfdf23b7bc",
+  "prompts": {},
+  "sessions": {
+    "s_39e8cde0cefc52": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb34ad1e-7f1d-4311-b382-5ca2b1b780e1",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
