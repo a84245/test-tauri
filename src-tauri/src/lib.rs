@@ -683,6 +683,31 @@ fn start_scan_listener(app: tauri::AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 前端把要保存的文件字节递过来：弹「另存为」对话框 → 写盘。
+///
+/// 为什么不让页面直接 `<a download>`：
+/// 主窗口装了 `.on_download(|_, _| true)`，而 wry 收到 true 之后会
+/// `args.SetHandled(true)` **接管**这次下载 —— 后果是 WebView2 自带的下载气泡
+/// 被完全抑制，保存路径沿用 WebView2 推出来的默认 ResultFilePath。
+/// 而页面里全站下载都是 `blob:` URL（既没有文件名也没有目录），推不出合法路径，
+/// 于是写盘失败且**零提示**。所以改由前端把字节交过来，这里给它一个正经的保存框。
+///
+/// 返回 `true` = 已保存；`false` = 用户在对话框里点了取消。
+#[tauri::command]
+fn save_bytes(app: tauri::AppHandle, filename: String, contents: Vec<u8>) -> Result<bool, String> {
+    let Some(file_path) = app
+        .dialog()
+        .file()
+        .set_file_name(&filename)
+        .blocking_save_file()
+    else {
+        return Ok(false); // 用户取消
+    };
+    let path = file_path.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, contents).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
+    Ok(true)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -694,7 +719,8 @@ pub fn run() {
             get_app_version,
             notify_popup_resize,
             notify_popup_hide,
-            notify_popup_action
+            notify_popup_action,
+            save_bytes
         ])
         .on_window_event(|window, event| {
             // 拦截主窗口关闭：弹原生对话框，询问「后台挂起」或「退出程序」
