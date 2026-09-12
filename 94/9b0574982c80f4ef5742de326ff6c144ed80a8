@@ -1,0 +1,23 @@
+src-tauri/Cargo.toml
+  s_39e8cde0cefc52::t_de8c2922e9e297 3
+src-tauri/tauri.conf.json
+  s_39e8cde0cefc52::t_b75e60a84af220 4
+package.json
+  s_39e8cde0cefc52::t_e80d9e226afff9 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "949b0574982c80f4ef5742de326ff6c144ed80a8",
+  "prompts": {},
+  "sessions": {
+    "s_39e8cde0cefc52": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb34ad1e-7f1d-4311-b382-5ca2b1b780e1",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
