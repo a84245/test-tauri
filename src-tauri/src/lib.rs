@@ -693,8 +693,15 @@ fn start_scan_listener(app: tauri::AppHandle) {
 /// 于是写盘失败且**零提示**。所以改由前端把字节交过来，这里给它一个正经的保存框。
 ///
 /// 返回 `true` = 已保存；`false` = 用户在对话框里点了取消。
+/// ⚠️ 必须是 `async fn`。
+///
+/// Tauri 的**同步**命令跑在主线程上，而在主线程调用 `blocking_save_file()`
+/// 会和事件循环死锁 —— 插件文档明确写了不要在 main-thread context 用它，
+/// 它自己给的示例也是 `async fn`。写成同步 `fn` 的后果不是报错弹窗，
+/// 而是命令静默失败，被前端的 catch 兜住退回 `<a download>`，
+/// 文件静静落进默认下载夹、不弹任何保存框。
 #[tauri::command]
-fn save_bytes(app: tauri::AppHandle, filename: String, contents: Vec<u8>) -> Result<bool, String> {
+async fn save_bytes(app: tauri::AppHandle, filename: String, contents: Vec<u8>) -> Result<bool, String> {
     let Some(file_path) = app
         .dialog()
         .file()
