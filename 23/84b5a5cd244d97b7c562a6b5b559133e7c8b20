@@ -1,0 +1,19 @@
+src-tauri/build.rs
+  s_39e8cde0cefc52::t_2fbad04a525ad9 16-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2384b5a5cd244d97b7c562a6b5b559133e7c8b20",
+  "prompts": {},
+  "sessions": {
+    "s_39e8cde0cefc52": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb34ad1e-7f1d-4311-b382-5ca2b1b780e1",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
