@@ -18,6 +18,7 @@
     "allow-get-app-version",
     "allow-notify-popup-resize",
     "allow-notify-popup-hide",
-    "allow-notify-popup-action"
+    "allow-notify-popup-action",
+    "allow-save-bytes"
   ]
 }
