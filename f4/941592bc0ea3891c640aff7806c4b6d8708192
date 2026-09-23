@@ -1,0 +1,21 @@
+src-tauri/tauri.conf.json
+  s_39e8cde0cefc52::t_c4337ecb7ad687 4
+src/notify-popup.html
+  s_39e8cde0cefc52::t_1ba11adbb25719 15-17,33-34,49-53,66,77-78,81-82,84,86,89-92,101,106,110-111,122,125,127,135-137,143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f4941592bc0ea3891c640aff7806c4b6d8708192",
+  "prompts": {},
+  "sessions": {
+    "s_39e8cde0cefc52": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb34ad1e-7f1d-4311-b382-5ca2b1b780e1",
+        "model": "unknown"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
