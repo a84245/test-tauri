@@ -280,6 +280,64 @@ fn open_local_folder(local_path: String) -> Result<String, String> {
     }
 }
 
+/// 由前端调用的自定义命令：用**系统默认程序**打开本地挂载盘（P:\）上的文件。
+///
+/// 与 `open_local_folder` 的分工：那个是用资源管理器「选中」文件（车间要拿它
+/// 去做本地编辑/另存），这个直接交给默认关联程序打开 —— 生产中心的预览按钮
+/// 要的就是「直接打开 PDF」，不用先弹资源管理器再双击一层。
+///
+/// `local_path` 期望是绝对路径，例如 `P:\Staff_Workspace\...\定稿.pdf`。
+///
+/// 返回值：
+///   - `Ok("opened")` 成功拉起默认程序
+///   - `Err(msg)` 路径非法 / 不存在（P:\ 未挂载）/ 启动失败（前端据此回退网页预览）
+#[tauri::command]
+fn open_local_file(local_path: String) -> Result<String, String> {
+    eprintln!("[open_local_file] 收到本地路径 local_path={local_path:?}");
+
+    // 1) 校验必须是绝对盘符路径；含双引号的一律拒绝 —— 下面交给 cmd 时路径带引号，
+    //    引号本身就是 cmd 的解析符号，放进去等于允许拼串。
+    if !local_path.contains(':') || local_path.len() < 3 || local_path.contains('"') {
+        return Err(format!("非法本地路径: {local_path}"));
+    }
+
+    // 2) 校验路径存在 —— P:\ 未挂载或文件不在本地时立刻失败，前端据此回退网页预览
+    let path = std::path::Path::new(&local_path);
+    if !path.exists() {
+        eprintln!("[open_local_file] 路径不存在（可能挂载盘未就绪）: {local_path}");
+        return Err(format!(
+            "路径不存在（请确认本地挂载盘 P:\\ 已就绪）: {local_path}"
+        ));
+    }
+
+    // 3) 交给默认程序。"start" 的第一个引号参数会被当成窗口标题，所以先给个空标题。
+    #[cfg(target_os = "windows")]
+    let spawned = {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW：别为这一下闪一个黑框
+        std::process::Command::new("cmd")
+            .args(["/C", "start", ""])
+            .arg(&local_path)
+            .creation_flags(0x0800_0000)
+            .spawn()
+    };
+    #[cfg(target_os = "macos")]
+    let spawned = std::process::Command::new("open").arg(&local_path).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let spawned = std::process::Command::new("xdg-open").arg(&local_path).spawn();
+
+    match spawned {
+        Ok(_) => {
+            eprintln!("[open_local_file] 已用默认程序打开: {local_path}");
+            Ok("opened".to_string())
+        }
+        Err(e) => {
+            eprintln!("[open_local_file] 启动默认程序失败: {e}");
+            Err(format!("打开失败: {e}"))
+        }
+    }
+}
+
 /// 返回当前应用版本号（如 "0.3.1"），前端用于升级检查对比
 #[tauri::command]
 fn get_app_version(app: tauri::AppHandle) -> String {
@@ -723,6 +781,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             notify,
             open_local_folder,
+            open_local_file,
             get_app_version,
             notify_popup_resize,
             notify_popup_hide,

@@ -8,6 +8,8 @@ fn main() {
             tauri_build::AppManifest::new().commands(&[
                 "notify",
                 "open_local_folder",
+                // 用默认程序直接打开挂载盘上的文件（生产中心预览按钮走这条）
+                "open_local_file",
                 "get_app_version",
                 // 自绘通知卡片窗口（notify-popup.html）用到的三个命令
                 "notify_popup_resize",

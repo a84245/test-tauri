@@ -15,6 +15,7 @@
     "notification:default",
     "allow-notify",
     "allow-open-local-folder",
+    "allow-open-local-file",
     "allow-get-app-version",
     "allow-notify-popup-resize",
     "allow-notify-popup-hide",
