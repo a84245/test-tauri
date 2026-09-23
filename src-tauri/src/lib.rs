@@ -8,9 +8,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_updater::UpdaterExt;
 use rdev::{listen, Event, EventType, Key};
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
-#[cfg(not(debug_assertions))]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
 use tauri_plugin_notification::NotificationExt;
 
@@ -44,11 +42,17 @@ const NOTIFY_POPUP_WIDTH: f64 = 600.0;
 /// 距屏幕右下角的留白
 const NOTIFY_POPUP_MARGIN: f64 = 16.0;
 
-/// 后台定时检查更新的间隔（秒）。
+/// 后台定时检查更新的间隔。
 /// 10 分钟：发版后员工不用重启壳也能很快收到更新提示；查的是一个静态 JSON，
 /// 这点频率对 MinIO 没有压力。（原先 60 分钟——发版当天基本等于要重启才看得到。）
 #[cfg(not(debug_assertions))]
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(600);
+
+/// 同一个版本两次提醒之间的最小间隔。
+/// 只在本次运行内弹一次的话，员工没点、把右下角那条通知划掉了就再也看不到更新提示
+/// （只能等重启壳）。所以同一个版本隔一段时间再提醒一次；远大于检查间隔，
+/// 不会变成反复打扰。换了新版本号则立即重新提醒。
+const UPDATE_REMIND_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 /// 发给通知卡片窗口的载荷。
 #[derive(Clone, serde::Serialize)]
@@ -353,8 +357,8 @@ fn get_app_version(app: tauri::AppHandle) -> String {
 /// 检查是否有新版本。
 /// `manual`：托盘手动触发时，无更新/失败会弹提示；启动自动与后台定时检测失败一律静默
 /// （可能临时没网，不打扰使用）。
-/// `periodic`：后台每 UPDATE_CHECK_INTERVAL 定时检测——发现新版只发一次系统通知（用户点击才更新），
-///             同一版本在本次运行内提醒过就不再打扰。
+/// `periodic`：后台每 UPDATE_CHECK_INTERVAL 定时检测——发现新版发一条系统通知（用户点击才更新），
+///             同一版本隔 UPDATE_REMIND_INTERVAL 才会再提醒一次。
 async fn check_for_updates(app: tauri::AppHandle, manual: bool, periodic: bool) {
     eprintln!("[update] 检查更新 manual={manual} periodic={periodic}");
     let result = match app.updater() {
@@ -369,14 +373,14 @@ async fn check_for_updates(app: tauri::AppHandle, manual: bool, periodic: bool) 
                 update.current_version
             );
             if periodic {
-                // 后台定时：仅提醒一次，点击通知才开始下载更新
-                if update_remind_once(&version) {
+                // 后台定时：发通知提醒，点击通知才开始下载更新
+                if update_remind_due(&version) {
                     notify_update_available(app, update);
                 } else {
-                    eprintln!("[update] v{version} 已在本次运行提醒过，跳过");
+                    eprintln!("[update] v{version} 刚提醒过，跳过");
                 }
             } else {
-                update_remind_once(&version);
+                update_remind_due(&version);
                 prompt_update(app, update);
             }
         }
@@ -405,18 +409,50 @@ async fn check_for_updates(app: tauri::AppHandle, manual: bool, periodic: bool) 
     }
 }
 
-/// 同一版本在本次运行内只提醒一次的标记。返回 `true` 表示「本次还没提醒过」。
-fn update_remind_once(version: &str) -> bool {
-    static NOTIFIED: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+/// 现在是该给这个版本发提醒的时候吗？
+///
+/// `true` = 发（并记下时间）；同一版本要等 UPDATE_REMIND_INTERVAL 之后才再次放行，
+/// 换了新版本号立即放行。这样员工错过/划掉一条通知后，过一阵还能再看到一次。
+fn update_remind_due(version: &str) -> bool {
+    static NOTIFIED: OnceLock<Mutex<Option<(String, Instant)>>> = OnceLock::new();
     let mut guard = NOTIFIED
         .get_or_init(|| Mutex::new(None))
         .lock()
         .unwrap();
-    if guard.as_deref() == Some(version) {
+    let now = Instant::now();
+    let due = match guard.as_ref() {
+        Some((v, at)) => v != version || now.duration_since(*at) >= UPDATE_REMIND_INTERVAL,
+        None => true,
+    };
+    if due {
+        *guard = Some((version.to_string(), now));
+    }
+    due
+}
+
+/// 下载/安装是否已经有一个在跑（见 update_download_begin）。
+static DOWNLOADING: OnceLock<Mutex<bool>> = OnceLock::new();
+
+/// 标记「开始下载更新」。返回 false = 已经有一个在跑，调用方放弃本次触发。
+///
+/// 重提醒会把同一个版本的通知弹多条（见 update_remind_due），员工可能每条都点一下，
+/// 这里挡掉并发下载 —— 否则两个安装器会同时被拉起。
+fn update_download_begin() -> bool {
+    let mut running = DOWNLOADING.get_or_init(|| Mutex::new(false)).lock().unwrap();
+    if *running {
         false
     } else {
-        *guard = Some(version.to_string());
+        *running = true;
         true
+    }
+}
+
+/// 放掉上面的标记。下载失败时调用，好让员工再点一次通知重试。
+fn update_download_end() {
+    if let Some(running) = DOWNLOADING.get() {
+        if let Ok(mut running) = running.lock() {
+            *running = false;
+        }
     }
 }
 
@@ -491,6 +527,11 @@ fn prompt_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
 /// Windows：安装由 NSIS 被动模式接管（自带安装进度），装完自动重启；
 /// macOS/Linux：装完后自行拉起新版本再退出本进程。
 fn download_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
+    // 多条「发现新版本」通知被依次点到时，只放一个下载进来
+    if !update_download_begin() {
+        eprintln!("[update] 已有更新正在下载，忽略这次重复触发");
+        return;
+    }
     let version = update.version.clone();
     eprintln!("[update] 开始下载并安装 v{version} …");
 
@@ -580,6 +621,8 @@ fn download_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) 
                 std::process::exit(0);
             }
             Err(e) => {
+                // 放掉标记，员工还能再点一次通知重试（不然得重启壳）
+                update_download_end();
                 let msg = format!("下载/安装失败：{e}");
                 eprintln!("[update] {msg}");
                 let _ = emitter.emit(
