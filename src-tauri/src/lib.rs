@@ -305,9 +305,8 @@ fn open_local_folder(local_path: String) -> Result<String, String> {
 fn open_local_file(local_path: String) -> Result<String, String> {
     eprintln!("[open_local_file] 收到本地路径 local_path={local_path:?}");
 
-    // 1) 校验必须是绝对盘符路径；含双引号的一律拒绝 —— 下面交给 cmd 时路径带引号，
-    //    引号本身就是 cmd 的解析符号，放进去等于允许拼串。
-    if !local_path.contains(':') || local_path.len() < 3 || local_path.contains('"') {
+    // 1) 校验必须是绝对盘符路径（防把非法串拼进系统调用）
+    if !local_path.contains(':') || local_path.len() < 3 {
         return Err(format!("非法本地路径: {local_path}"));
     }
 
@@ -320,30 +319,73 @@ fn open_local_file(local_path: String) -> Result<String, String> {
         ));
     }
 
-    // 3) 交给默认程序。"start" 的第一个引号参数会被当成窗口标题，所以先给个空标题。
+    // 3) 交给系统默认关联程序打开。
+    //
+    // Windows 上走 ShellExecuteW，不用 `cmd /C start`：后者把路径丢给 cmd 后立刻
+    // 返回，真正打开失败（系统没关联程序、文件被别家占用、ShellExecute 不认这个路径）
+    // 全被吞掉，前端拿到 Ok 就不回退网页预览 —— 员工看到的就是「点了没反应」。
+    // ShellExecuteW 直接返回结果码（> 32 才算成功），顺带绕开 cmd 的命令行解析与代码页。
     #[cfg(target_os = "windows")]
-    let spawned = {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW：别为这一下闪一个黑框
-        std::process::Command::new("cmd")
-            .args(["/C", "start", ""])
-            .arg(&local_path)
-            .creation_flags(0x0800_0000)
-            .spawn()
+    let launched: Result<String, String> = {
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let to_wide = |s: &str| -> Vec<u16> {
+            s.encode_utf16().chain(std::iter::once(0)).collect()
+        };
+        let verb = to_wide("open");
+        let file = to_wide(&local_path);
+        // SAFETY: 两个字符串都是 NUL 结尾的 UTF-16；窗口句柄/参数/工作目录传 null。
+        let rc = unsafe {
+            ShellExecuteW(
+                None,
+                PCWSTR(verb.as_ptr()),
+                PCWSTR(file.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        // HINSTANCE <= 32 即失败，取值是 SE_ERR_* 错误码
+        let code = rc.0 as isize;
+        if code > 32 {
+            Ok("opened".to_string())
+        } else {
+            Err(match code {
+                0 | 8 => "系统内存不足".to_string(),
+                2 => "文件不存在".to_string(),
+                3 => "路径不存在".to_string(),
+                5 => "没有访问权限".to_string(),
+                26 => "文件被其他程序占用".to_string(),
+                27 | 31 => "系统里没有能打开这类文件的程序".to_string(),
+                28 | 29 | 30 => "系统关联程序无响应".to_string(),
+                32 => "系统组件缺失".to_string(),
+                other => format!("系统错误码 {other}"),
+            })
+        }
     };
     #[cfg(target_os = "macos")]
-    let spawned = std::process::Command::new("open").arg(&local_path).spawn();
+    let launched: Result<String, String> = std::process::Command::new("open")
+        .arg(&local_path)
+        .spawn()
+        .map(|_| "opened".to_string())
+        .map_err(|e| format!("启动默认程序失败: {e}"));
     #[cfg(all(unix, not(target_os = "macos")))]
-    let spawned = std::process::Command::new("xdg-open").arg(&local_path).spawn();
+    let launched: Result<String, String> = std::process::Command::new("xdg-open")
+        .arg(&local_path)
+        .spawn()
+        .map(|_| "opened".to_string())
+        .map_err(|e| format!("启动默认程序失败: {e}"));
 
-    match spawned {
-        Ok(_) => {
+    match launched {
+        Ok(v) => {
             eprintln!("[open_local_file] 已用默认程序打开: {local_path}");
-            Ok("opened".to_string())
+            Ok(v)
         }
         Err(e) => {
-            eprintln!("[open_local_file] 启动默认程序失败: {e}");
-            Err(format!("打开失败: {e}"))
+            eprintln!("[open_local_file] 打开失败: {e} —— {local_path}");
+            Err(format!("{e}: {local_path}"))
         }
     }
 }

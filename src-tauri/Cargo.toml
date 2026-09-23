@@ -1,6 +1,6 @@
 [package]
 name = "pengmaitw"
-version = "0.3.15"
+version = "0.3.16"
 description = "Pengmai Printing"
 authors = ["you"]
 edition = "2021"
@@ -36,5 +36,6 @@ rdev = "0.5"
 # 前端 onAction 不触发（窗口打不开、路由不跳转）。必须与开始菜单快捷方式
 # 注册的 AUMID 一致。
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation"] }
+# Win32_UI_WindowsAndMessaging：ShellExecuteW 的 SW_SHOWNORMAL 常量在这个 feature 下
+windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
