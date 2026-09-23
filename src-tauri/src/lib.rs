@@ -44,6 +44,12 @@ const NOTIFY_POPUP_WIDTH: f64 = 600.0;
 /// 距屏幕右下角的留白
 const NOTIFY_POPUP_MARGIN: f64 = 16.0;
 
+/// 后台定时检查更新的间隔（秒）。
+/// 10 分钟：发版后员工不用重启壳也能很快收到更新提示；查的是一个静态 JSON，
+/// 这点频率对 MinIO 没有压力。（原先 60 分钟——发版当天基本等于要重启才看得到。）
+#[cfg(not(debug_assertions))]
+const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(600);
+
 /// 发给通知卡片窗口的载荷。
 #[derive(Clone, serde::Serialize)]
 struct NotifyPopupPayload {
@@ -347,7 +353,7 @@ fn get_app_version(app: tauri::AppHandle) -> String {
 /// 检查是否有新版本。
 /// `manual`：托盘手动触发时，无更新/失败会弹提示；启动自动与后台定时检测失败一律静默
 /// （可能临时没网，不打扰使用）。
-/// `periodic`：后台每 60 分钟定时检测——发现新版只发一次系统通知（用户点击才更新），
+/// `periodic`：后台每 UPDATE_CHECK_INTERVAL 定时检测——发现新版只发一次系统通知（用户点击才更新），
 ///             同一版本在本次运行内提醒过就不再打扰。
 async fn check_for_updates(app: tauri::AppHandle, manual: bool, periodic: bool) {
     eprintln!("[update] 检查更新 manual={manual} periodic={periodic}");
@@ -961,7 +967,7 @@ pub fn run() {
 
             // 发布版更新检测：
             //   1) 启动约 8 秒后自动检查一次（有新版会弹确认框）
-            //   2) 之后每 60 分钟后台静默定时检测（有新版只发一次通知，点击才更新；失败不打扰）
+            //   2) 之后每 UPDATE_CHECK_INTERVAL 后台静默定时检测（有新版只发一次通知，点击才更新；失败不打扰）
             // debug 构建不做自动检查，需要时用托盘「检查更新…」手动触发。
             #[cfg(not(debug_assertions))]
             {
@@ -972,9 +978,8 @@ pub fn run() {
                     tauri::async_runtime::spawn(async move {
                         check_for_updates(app_startup, false, false).await;
                     });
-                    // 60 分钟周期定时检测
                     loop {
-                        std::thread::sleep(Duration::from_secs(3600));
+                        std::thread::sleep(UPDATE_CHECK_INTERVAL);
                         let app_tick = app_handle.clone();
                         tauri::async_runtime::spawn(async move {
                             check_for_updates(app_tick, false, true).await;
