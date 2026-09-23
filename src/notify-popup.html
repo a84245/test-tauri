@@ -12,6 +12,9 @@
          窗口本身是「无边框 / 透明 / 置顶 / 不进任务栏」的独立窗口，
          主程序缩到托盘时也能弹。
          ─────────────────────────────────────────────── */
+      /*
+       * 配色恢复成原来的品牌色板（下面圆角/字体/去渐变那些改动保留）。
+       */
       :root {
         --brand: #0b49c8;
         --brand-soft: #2e6fe8;
@@ -27,7 +30,8 @@
         overflow: hidden;
         user-select: none;
         -webkit-user-select: none;
-        font-family: "Microsoft YaHei", "PingFang SC", system-ui, -apple-system, sans-serif;
+        /* Windows 优先；Segoe UI Variable 是 Win11 的系统界面字体 */
+        font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
       }
 
       body { padding: 6px 16px 16px 8px; }
@@ -42,10 +46,11 @@
       /* ── 卡片 ── */
       .card {
         position: relative;
-        border-radius: 16px;
-        background: linear-gradient(150deg, #f7faff 0%, #eef4ff 45%, #e6efff 100%);
-        border: 1px solid #dbe5f7;
-        box-shadow: 0 14px 34px rgba(15, 45, 105, 0.16), 0 2px 8px rgba(15, 45, 105, 0.08);
+        /* Win11 通知是 8px 方角、纯白、一层投影 —— 不是 16px 大圆角 + 无级渐变的网页卡 */
+        border-radius: 8px;
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.14);
         padding: 14px 16px;
         transform: translateX(118%);
         opacity: 0;
@@ -58,7 +63,7 @@
       }
 
       /* ── 头部 ── */
-      .head { display: flex; align-items: center; gap: 9px; padding-bottom: 12px; }
+      .head { display: flex; align-items: center; gap: 8px; padding-bottom: 10px; }
       .spark { flex-shrink: 0; color: var(--brand-soft); animation: twinkle 2.4s ease-in-out infinite; }
       .spark svg { width: 15px; height: 15px; display: block; }
       .spark.sm svg { width: 11px; height: 11px; }
@@ -69,24 +74,22 @@
       }
       .title { font-size: 16px; font-weight: 700; color: var(--brand); letter-spacing: 0.3px; line-height: 1.2; }
       .count {
-        flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--brand);
-        background: rgba(11, 73, 200, 0.09); border-radius: 999px; padding: 2px 8px;
+        flex-shrink: 0; font-size: 11px; font-weight: 600; color: #5b6577;
+        background: #f2f6ff; border-radius: 4px; padding: 2px 6px;
       }
       .close {
-        margin-left: auto; width: 26px; height: 26px; flex-shrink: 0;
-        border: 0; border-radius: 8px; background: transparent; color: #9aa6bb;
+        margin-left: auto; width: 24px; height: 24px; flex-shrink: 0;
+        border: 0; border-radius: 4px; background: transparent; color: var(--ink-label);
         cursor: pointer; display: flex; align-items: center; justify-content: center;
-        transition: background 0.16s ease, color 0.16s ease;
+        transition: background 0.12s ease, color 0.12s ease;
       }
-      .close:hover { background: #dde7fa; color: var(--brand); }
+      .close:hover { background: #f2f6ff; color: var(--ink); }
       .close svg { width: 14px; height: 14px; }
 
-      /* ── 内容框：白底 · 黑字 · 细边框 ── */
-      .panel {
-        background: #fff; border: 1px solid var(--line); border-radius: 11px;
-        padding: 12px 14px 13px;
-        box-shadow: 0 1px 2px rgba(15, 45, 105, 0.04);
-      }
+      /* ── 内容区 ──
+         卡片本身已经是白底了，这里再套一个白底圆角框就是"两层套娃"（原来卡片是蓝渐变，
+         嵌套才有意义）。现在把它拍平：不加背景、不加边框、不加圆角，只剩内容。 */
+      .panel { background: transparent; border: 0; border-radius: 0; padding: 0; box-shadow: none; }
 
       /* 五列表格：订单号 / 客户 / 下单产品 / 下单时间 / 金额 */
       .tbl {
@@ -95,17 +98,17 @@
         column-gap: 8px;
       }
       .th {
-        font-size: 11.5px; color: var(--ink-label); letter-spacing: 0.5px;
+        font-size: 11px; color: var(--ink-label); letter-spacing: 0;
         padding-bottom: 6px; border-bottom: 1px solid var(--line);
       }
       .th.right { text-align: right; }
       .td {
-        font-size: 12.5px; color: var(--ink); font-weight: 500; padding-top: 8px;
+        font-size: 12px; color: var(--ink); font-weight: 400; padding-top: 8px;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
       /* 订单号是 WEB+17 位，等宽字体 + 略小，避免挤掉后面的列 */
-      .td.mono { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11.5px; letter-spacing: 0; }
-      .td.amount { font-size: 13.5px; font-weight: 700; text-align: right; }
+      .td.mono { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11px; letter-spacing: 0; }
+      .td.amount { font-size: 13px; font-weight: 600; text-align: right; }
 
       /* 没有结构化数据时的兜底 */
       .fallback { font-size: 13px; color: var(--ink); line-height: 1.6; white-space: normal; word-break: break-word; }
@@ -116,12 +119,12 @@
         margin-top: 11px; font-size: 12px; color: var(--ink-label);
       }
       .pager button {
-        width: 22px; height: 22px; border-radius: 7px; cursor: pointer;
+        width: 22px; height: 22px; border-radius: 4px; cursor: pointer;
         border: 1px solid var(--line); background: #fff; color: #5b6577;
         display: flex; align-items: center; justify-content: center;
-        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
       }
-      .pager button:hover:not(:disabled) { background: #f2f6ff; border-color: #c9d7f0; color: var(--brand); }
+      .pager button:hover:not(:disabled) { background: #f2f6ff; border-color: var(--brand); color: var(--brand); }
       .pager button:disabled { opacity: 0.35; cursor: default; }
       .pager svg { width: 11px; height: 11px; }
       .pager .pos { font-variant-numeric: tabular-nums; }
@@ -129,15 +132,15 @@
       /* ── 操作按钮 ── */
       .actions { display: flex; gap: 10px; margin-top: 13px; }
       .btn {
-        flex: 1; font: inherit; font-size: 13px; font-weight: 600;
-        padding: 8px 0; border-radius: 9px; cursor: pointer; border: 1px solid transparent;
-        transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.1s ease;
+        flex: 1; font: inherit; font-size: 12px; font-weight: 600;
+        padding: 7px 0; border-radius: 4px; cursor: pointer; border: 1px solid transparent;
+        transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
       }
       .btn:active { transform: scale(0.985); }
       .btn-primary { background: var(--brand); color: #fff; }
       .btn-primary:hover { background: #0a41b4; }
       .btn-ghost { background: #fff; color: #5b6577; border-color: var(--line); }
-      .btn-ghost:hover { background: #f5f8ff; border-color: #c9d7f0; color: var(--brand); }
+      .btn-ghost:hover { background: #f2f6ff; border-color: var(--brand); color: var(--brand); }
     </style>
   </head>
   <body>
