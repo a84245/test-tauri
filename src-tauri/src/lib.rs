@@ -955,6 +955,18 @@ pub fn run() {
             )
             .title(main_window_title.clone())
             .inner_size(1200.0, 800.0)
+            /*
+             * 禁掉 WebView2 的右键菜单。
+             *
+             * 壳里弹出来的是浏览器菜单（刷新 / 另存为 / 检查 / 打印…）—— 那是浏览器的东西，
+             * 出现在桌面程序里就像"没做完的网页"。注在所有文档最前面、capture 阶段拦掉，
+             * 免得页面上别处的监听先处理了；对远程页面（110.42.239.85:5000）同样生效。
+             *
+             * 只管主窗口。预览/工作单那些子窗口是看 PDF 的，右键的「打印 / 另存为」在那儿有用。
+             */
+            .initialization_script(
+                "document.addEventListener('contextmenu', function (e) { e.preventDefault(); }, { capture: true });",
+            )
             // 远程页面改 document.title 会试图覆盖标题，这里一律改回固定标题
             .on_document_title_changed({
                 let fixed = main_window_title.clone();
