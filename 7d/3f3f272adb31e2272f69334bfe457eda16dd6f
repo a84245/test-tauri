@@ -1,0 +1,21 @@
+src-tauri/tauri.conf.json
+  s_39e8cde0cefc52::t_200e11d11703bd 4
+src-tauri/src/lib.rs
+  s_39e8cde0cefc52::t_d8c9ec5ef2254b 958-969
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d3f3f272adb31e2272f69334bfe457eda16dd6f",
+  "prompts": {},
+  "sessions": {
+    "s_39e8cde0cefc52": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb34ad1e-7f1d-4311-b382-5ca2b1b780e1",
+        "model": "unknown"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
