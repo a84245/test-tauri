@@ -552,7 +552,7 @@ pub fn run() {
             // 默认加载线上地址；本地联调时可用环境变量指定本地前端：
             //   PENGMAI_FRONTEND_URL=http://localhost:5000 pnpm tauri dev
             let frontend_url = std::env::var("PENGMAI_FRONTEND_URL")
-                .unwrap_or_else(|_| "http://110.42.239.85:5000".to_string());
+                .unwrap_or_else(|_| "https://fanmai.synology.me:8007".to_string());
             // 主窗口的 app handle，供 on_new_window 闭包创建子窗口用
             let app_handle = app.handle().clone();
             // 窗口标题固定为「芃麦印刷-版本号」，忽略远程页面的 document.title

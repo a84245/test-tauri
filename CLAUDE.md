@@ -8,7 +8,7 @@ This is a **Tauri desktop application** (芃麦印刷/Pengmai Printing) that wra
 
 ### Core Architecture
 
-- **Hybrid Architecture**: The main window loads a remote web application (`http://110.42.239.85:5000` in production) via Tauri's `WebviewUrl::External`
+- **Hybrid Architecture**: The main window loads a remote web application (`https://fanmai.synology.me:8007` in production) via Tauri's `WebviewUrl::External`
 - **System Integration**: Provides native system notifications, tray icon functionality, and window management
 - **Auto Update**: Self-updates via official `tauri-plugin-updater`, driven entirely in Rust (no remote-frontend involvement)
 - **Cross-Platform Notifications**: Custom notification implementation with platform-specific approaches:
