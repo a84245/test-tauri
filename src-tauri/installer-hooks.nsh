@@ -27,9 +27,27 @@
 !macroend
 
 ; 安装完成后：如果旧安装目录不同于当前目录，删除旧目录防止多处安装
+; 同时注册 AUMID，让 Windows Toast 能显示正确的应用名与图标
 !macro NSIS_HOOK_POSTINSTALL
   ${If} $R1 != ""
   ${AndIf} $R1 != "$INSTDIR"
     RMDir /r "$R1"
   ${EndIf}
+
+  ; ── 注册 AppUserModelID（AUMID）────────────────────────────────
+  ; 非打包（unpackaged）Win32 应用发 Toast 时，Windows 是靠 AUMID 去
+  ; HKCU\Software\Classes\AppUserModelId\<AUMID> 下找 DisplayName / IconUri
+  ; 来决定通知上显示什么应用名和图标的。不写这里，通知上就是空白/默认图标
+  ; —— 看起来非常像山寨弹窗。
+  ;
+  ; 注意：这里的 AUMID 必须与 src-tauri/src/lib.rs 的 APP_ID、
+  ; main.rs 的 SetCurrentProcessExplicitAppUserModelID、以及
+  ; tauri.conf.json 的 identifier 完全一致，任何一处不一致都会失效。
+  WriteRegStr HKCU "Software\Classes\AppUserModelId\com.dev.pengmaitw" "DisplayName" "芃麦印刷"
+  WriteRegStr HKCU "Software\Classes\AppUserModelId\com.dev.pengmaitw" "IconUri" "$INSTDIR\pengmaitw.exe"
+!macroend
+
+; 卸载前：清掉上面注册的 AUMID，避免卸载后残留
+!macro NSIS_HOOK_PREUNINSTALL
+  DeleteRegKey HKCU "Software\Classes\AppUserModelId\com.dev.pengmaitw"
 !macroend

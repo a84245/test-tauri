@@ -8,7 +8,18 @@ fn main() {
             tauri_build::AppManifest::new().commands(&[
                 "notify",
                 "open_local_folder",
+                // 用默认程序直接打开挂载盘上的文件（生产中心预览按钮走这条）
+                "open_local_file",
                 "get_app_version",
+                // 自绘通知卡片窗口（notify-popup.html）用到的三个命令
+                "notify_popup_resize",
+                "notify_popup_hide",
+                "notify_popup_action",
+                // 导出「另存为」：前端把文件字节递过来，这里弹保存框再落盘。
+                // ⚠️ 新增命令要**同时**改两处，少任何一处都只在运行时才暴露：
+                //   ① 这里 build.rs 的 commands 清单 —— 生成 allow-<cmd> 权限
+                //   ② capabilities/default.json 的 permissions —— 把权限授给窗口
+                "save_bytes",
             ]),
         ),
     )

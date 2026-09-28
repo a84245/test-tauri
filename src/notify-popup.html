@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>通知</title>
+    <style>
+      /* ───────────────────────────────────────────────
+         自绘通知卡片：淡蓝头部 + 白底黑字多列表格 + 从右侧滑入
+         · 同一批次（data.batchNo）的通知合并到同一张卡片，追加成多行
+         · 每页 3 行，超出显示分页器
+         窗口本身是「无边框 / 透明 / 置顶 / 不进任务栏」的独立窗口，
+         主程序缩到托盘时也能弹。
+         ─────────────────────────────────────────────── */
+      /*
+       * 配色恢复成原来的品牌色板（下面圆角/字体/去渐变那些改动保留）。
+       */
+      :root {
+        --brand: #0b49c8;
+        --brand-soft: #2e6fe8;
+        --ink: #1f2328;
+        --ink-label: #8a94a6;
+        --line: #e3e8f0;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      html, body {
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+        /* Windows 优先；Segoe UI Variable 是 Win11 的系统界面字体 */
+        font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+      }
+
+      body { padding: 6px 16px 16px 8px; }
+
+      #stack {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 12px;
+      }
+
+      /* ── 卡片 ── */
+      .card {
+        position: relative;
+        /* Win11 通知是 8px 方角、纯白、一层投影 —— 不是 16px 大圆角 + 无级渐变的网页卡 */
+        border-radius: 8px;
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.14);
+        padding: 14px 16px;
+        transform: translateX(118%);
+        opacity: 0;
+        transition: transform 0.46s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.34s ease;
+      }
+      .card.show { transform: translateX(0); opacity: 1; }
+      .card.leaving {
+        transform: translateX(118%); opacity: 0;
+        transition: transform 0.32s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.3s ease;
+      }
+
+      /* ── 头部 ── */
+      .head { display: flex; align-items: center; gap: 8px; padding-bottom: 10px; }
+      .spark { flex-shrink: 0; color: var(--brand-soft); animation: twinkle 2.4s ease-in-out infinite; }
+      .spark svg { width: 15px; height: 15px; display: block; }
+      .spark.sm svg { width: 11px; height: 11px; }
+      .spark.sm { animation-delay: 0.5s; }
+      @keyframes twinkle {
+        0%, 100% { opacity: 0.55; transform: scale(0.92) rotate(0deg); }
+        50%      { opacity: 1;    transform: scale(1.06) rotate(12deg); }
+      }
+      .title { font-size: 16px; font-weight: 700; color: var(--brand); letter-spacing: 0.3px; line-height: 1.2; }
+      .count {
+        flex-shrink: 0; font-size: 11px; font-weight: 600; color: #5b6577;
+        background: #f2f6ff; border-radius: 4px; padding: 2px 6px;
+      }
+      .close {
+        margin-left: auto; width: 24px; height: 24px; flex-shrink: 0;
+        border: 0; border-radius: 4px; background: transparent; color: var(--ink-label);
+        cursor: pointer; display: flex; align-items: center; justify-content: center;
+        transition: background 0.12s ease, color 0.12s ease;
+      }
+      .close:hover { background: #f2f6ff; color: var(--ink); }
+      .close svg { width: 14px; height: 14px; }
+
+      /* ── 内容区 ──
+         卡片本身已经是白底了，这里再套一个白底圆角框就是"两层套娃"（原来卡片是蓝渐变，
+         嵌套才有意义）。现在把它拍平：不加背景、不加边框、不加圆角，只剩内容。 */
+      .panel { background: transparent; border: 0; border-radius: 0; padding: 0; box-shadow: none; }
+
+      /* 五列表格：订单号 / 客户 / 下单产品 / 下单时间 / 金额 */
+      .tbl {
+        display: grid;
+        grid-template-columns: 1.5fr 0.8fr 1.2fr 1.35fr 0.85fr;
+        column-gap: 8px;
+      }
+      .th {
+        font-size: 11px; color: var(--ink-label); letter-spacing: 0;
+        padding-bottom: 6px; border-bottom: 1px solid var(--line);
+      }
+      .th.right { text-align: right; }
+      .td {
+        font-size: 12px; color: var(--ink); font-weight: 400; padding-top: 8px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      /* 订单号是 WEB+17 位，等宽字体 + 略小，避免挤掉后面的列 */
+      .td.mono { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11px; letter-spacing: 0; }
+      .td.amount { font-size: 13px; font-weight: 600; text-align: right; }
+
+      /* 没有结构化数据时的兜底 */
+      .fallback { font-size: 13px; color: var(--ink); line-height: 1.6; white-space: normal; word-break: break-word; }
+
+      /* ── 分页器（超过 3 行才出现）── */
+      .pager {
+        display: flex; align-items: center; gap: 8px;
+        margin-top: 11px; font-size: 12px; color: var(--ink-label);
+      }
+      .pager button {
+        width: 22px; height: 22px; border-radius: 4px; cursor: pointer;
+        border: 1px solid var(--line); background: #fff; color: #5b6577;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+      }
+      .pager button:hover:not(:disabled) { background: #f2f6ff; border-color: var(--brand); color: var(--brand); }
+      .pager button:disabled { opacity: 0.35; cursor: default; }
+      .pager svg { width: 11px; height: 11px; }
+      .pager .pos { font-variant-numeric: tabular-nums; }
+
+      /* ── 操作按钮 ── */
+      .actions { display: flex; gap: 10px; margin-top: 13px; }
+      .btn {
+        flex: 1; font: inherit; font-size: 12px; font-weight: 600;
+        padding: 7px 0; border-radius: 4px; cursor: pointer; border: 1px solid transparent;
+        transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+      }
+      .btn:active { transform: scale(0.985); }
+      .btn-primary { background: var(--brand); color: #fff; }
+      .btn-primary:hover { background: #0a41b4; }
+      .btn-ghost { background: #fff; color: #5b6577; border-color: var(--line); }
+      .btn-ghost:hover { background: #f2f6ff; border-color: var(--brand); color: var(--brand); }
+    </style>
+  </head>
+  <body>
+    <div id="stack"></div>
+
+    <script>
+      const { listen } = window.__TAURI__.event;
+      const { invoke } = window.__TAURI__.core;
+
+      const stack = document.getElementById("stack");
+      /** 已展示的卡片：[{ groupKey, rows: [], page, el, refs }] */
+      const cards = [];
+
+      /** 每页展示的数据行数，超过则出现分页器 */
+      const PAGE_SIZE = 3;
+      /** 最多同时存在几张卡片（不同批次各一张） */
+      const MAX_CARDS = 3;
+
+      /** 表格列定义：[表头, data 里的字段名, 额外 class] */
+      const COLUMNS = [
+        ["订单号", "orderNo", "mono"],
+        ["客户", "customer", ""],
+        ["下单产品", "product", ""],
+        ["下单时间", "time", ""],
+        ["金额", "amount", "amount"],
+      ];
+
+      const SPARK = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.6c.5 3.9 1.9 6.3 4.2 7.2 1.4.6 3.1.8 6.2.8-3.1 0-4.8.2-6.2.8-2.3.9-3.7 3.3-4.2 7.2-.5-3.9-1.9-6.3-4.2-7.2-1.4-.6-3.1-.8-6.2-.8 3.1 0 4.8-.2 6.2-.8C10.1 7.9 11.5 5.5 12 1.6Z"/></svg>';
+      const CARET_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
+      const CARET_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+
+      const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      })[c]);
+      const has = (v) => v !== undefined && v !== null && String(v).trim() !== "";
+
+      /* ── 窗口高度跟随内容（底边固定贴住屏幕右下角）── */
+      let resizeTimer = null;
+      function syncHeight() {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          invoke("notify_popup_resize", { height: Math.ceil(document.body.scrollHeight) }).catch(() => {});
+          if (cards.length === 0) invoke("notify_popup_hide").catch(() => {});
+        }, 30);
+      }
+
+      function removeCard(entry, animate = true) {
+        const i = cards.indexOf(entry);
+        if (i < 0) return;
+        cards.splice(i, 1);
+        if (animate) {
+          entry.el.classList.add("leaving");
+          setTimeout(() => { entry.el.remove(); syncHeight(); }, 330);
+        } else {
+          entry.el.remove();
+        }
+      }
+
+      /* ── 表格渲染：表头 + 当前页的数据行 ── */
+      function tableHtml(rows, page) {
+        const th = COLUMNS
+          .map(([k, , cls]) => `<div class="th${cls === "amount" ? " right" : ""}">${k}</div>`)
+          .join("");
+        const slice = rows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+        const td = slice
+          .map((r) => COLUMNS
+            .map(([, key, cls]) => {
+              const v = has(r[key]) ? r[key] : "—";
+              return `<div class="td ${cls}" title="${esc(v)}">${esc(v)}</div>`;
+            })
+            .join(""))
+          .join("");
+        return `<div class="tbl">${th}${td}</div>`;
+      }
+
+      /** 重画某张卡片的表格 / 分页器 / 计数（追加行或翻页后调用） */
+      function repaint(entry) {
+        const { rows, page, refs } = entry;
+        const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+        if (page > totalPages - 1) entry.page = totalPages - 1;
+
+        if (rows.length === 0) {
+          refs.panel.innerHTML = `<div class="fallback">${esc(entry.fallback)}</div>`;
+        } else {
+          refs.panel.innerHTML = tableHtml(rows, entry.page);
+        }
+
+        refs.count.textContent = rows.length > 1 ? `${rows.length} 单` : "";
+        refs.count.style.display = rows.length > 1 ? "" : "none";
+
+        if (totalPages > 1) {
+          refs.pager.style.display = "";
+          refs.pager.querySelector(".pos").textContent = `${entry.page + 1}/${totalPages}`;
+          refs.pager.querySelector(".prev").disabled = entry.page === 0;
+          refs.pager.querySelector(".next").disabled = entry.page >= totalPages - 1;
+        } else {
+          refs.pager.style.display = "none";
+        }
+        syncHeight();
+      }
+
+      function makeCard(p) {
+        const el = document.createElement("div");
+        el.className = "card";
+        el.innerHTML = `
+          <div class="head">
+            <span class="spark">${SPARK}</span>
+            <span class="title">${esc(p.title || "新订单到了！")}</span>
+            <span class="count" style="display:none"></span>
+            <span class="spark sm">${SPARK}</span>
+            <button class="close" title="关闭">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div class="panel"></div>
+          <div class="pager" style="display:none">
+            <button class="prev" title="上一页">${CARET_L}</button>
+            <span class="pos"></span>
+            <button class="next" title="下一页">${CARET_R}</button>
+          </div>
+          <div class="actions">
+            ${p.path ? '<button class="btn btn-primary" data-act="view">查看订单</button>' : ""}
+            <button class="btn btn-ghost" data-act="ignore">忽略</button>
+          </div>
+        `;
+        return el;
+      }
+
+      function addOrMerge(p) {
+        // 同一批次（batchNo 相同）合并进已有卡片，追加一行
+        const key = p.data && has(p.data.batchNo) ? String(p.data.batchNo) : null;
+        let entry = key ? cards.find((c) => c.groupKey === key) : null;
+
+        if (entry) {
+          entry.rows.push(p.data || {});
+          entry.page = Math.ceil(entry.rows.length / PAGE_SIZE) - 1;   // 自动翻到最后一页看新单
+          repaint(entry);
+          return;
+        }
+
+        while (cards.length >= MAX_CARDS) removeCard(cards[0], false);
+
+        const el = makeCard(p);
+        entry = {
+          id: p.id,
+          groupKey: key,
+          rows: p.data ? [p.data] : [],
+          fallback: p.body || "",
+          page: 0,
+          el,
+          refs: {
+            panel: el.querySelector(".panel"),
+            pager: el.querySelector(".pager"),
+            count: el.querySelector(".count"),
+          },
+        };
+        cards.push(entry);
+        stack.appendChild(el);
+
+        entry.refs.pager.querySelector(".prev").addEventListener("click", () => {
+          if (entry.page > 0) { entry.page -= 1; repaint(entry); }
+        });
+        entry.refs.pager.querySelector(".next").addEventListener("click", () => {
+          const total = Math.ceil(entry.rows.length / PAGE_SIZE);
+          if (entry.page < total - 1) { entry.page += 1; repaint(entry); }
+        });
+        el.querySelector(".close").addEventListener("click", () => {
+          invoke("notify_popup_action", { id: entry.id ?? null, action: "ignore" }).catch(() => {});
+          removeCard(entry);
+        });
+        el.querySelectorAll("[data-act]").forEach((b) => {
+          b.addEventListener("click", () => {
+            invoke("notify_popup_action", { id: entry.id ?? null, action: b.getAttribute("data-act") }).catch(() => {});
+            removeCard(entry);
+          });
+        });
+
+        repaint(entry);
+        requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("show")));
+      }
+
+      listen("notify:show", (e) => addOrMerge(e.payload || {}));
+    </script>
+  </body>
+</html>

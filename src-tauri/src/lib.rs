@@ -1,6 +1,6 @@
 #[allow(unused_imports)]
 use tauri::{
-    Emitter, Manager, WindowEvent,
+    Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow, WindowEvent,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
@@ -8,14 +8,200 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_updater::UpdaterExt;
 use rdev::{listen, Event, EventType, Key};
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
-#[cfg(not(debug_assertions))]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
 use tauri_plugin_notification::NotificationExt;
 
-/// 由前端调用的自定义命令：用壳（Rust）原生 API 发送系统通知。
-/// 这样绕开 Web Notification 的 HTTPS 安全上下文限制，也不经过通知插件的前端 ACL。
+/// 应用 AppUserModelID（AUMID）。
+///
+/// 必须三处完全一致，否则 Windows 无法把 Toast 归属到本应用，
+/// 通知上的「应用名」和「图标」会显示成空白/默认值：
+///   1. main.rs 的 SetCurrentProcessExplicitAppUserModelID
+///   2. tauri.conf.json 的 identifier
+///   3. 注册表 HKCU\Software\Classes\AppUserModelId\<此值> 的 DisplayName / IconUri
+///      （由 installer-hooks.nsh 在安装时写入）
+pub const APP_ID: &str = "com.dev.pengmaitw";
+
+/// 通知按钮：identifier -> 按钮文案。
+/// 前端点击后 Rust 侧 wait_for_action 会收到 identifier，
+/// 除了「忽略」以外的动作都视为「查看」，会恢复窗口并触发路由跳转。
+const ACTION_VIEW: &str = "default";
+const ACTION_IGNORE: &str = "ignore";
+
+// ─────────────────────────── 自绘通知卡片窗口 ───────────────────────────
+// 系统 toast 的外观由 Windows 绘制、应用改不了，所以改成自己开一个
+// 无边框透明小窗，用本地 notify-popup.html 画卡片；主程序缩到托盘时
+// 这个窗口依然存在，所以后台也能弹。
+
+/// 通知卡片窗口的 label（对应 src/notify-popup.html）
+const NOTIFY_POPUP_LABEL: &str = "notify_popup";
+/// 卡片窗口宽度（逻辑像素；高度随内容动态变化）。
+/// 需要放下「订单号 / 客户 / 下单产品 / 下单时间 / 金额」五列表格，
+/// 订单号是 WEB+17 位（19 字符），太窄会把它挤成省略号。
+const NOTIFY_POPUP_WIDTH: f64 = 600.0;
+/// 距屏幕右下角的留白
+const NOTIFY_POPUP_MARGIN: f64 = 16.0;
+
+/// 后台定时检查更新的间隔。
+/// 10 分钟：发版后员工不用重启壳也能很快收到更新提示；查的是一个静态 JSON，
+/// 这点频率对 MinIO 没有压力。（原先 60 分钟——发版当天基本等于要重启才看得到。）
+#[cfg(not(debug_assertions))]
+const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(600);
+
+/// 同一个版本两次提醒之间的最小间隔。
+/// 只在本次运行内弹一次的话，员工没点、把右下角那条通知划掉了就再也看不到更新提示
+/// （只能等重启壳）。所以同一个版本隔一段时间再提醒一次；远大于检查间隔，
+/// 不会变成反复打扰。换了新版本号则立即重新提醒。
+const UPDATE_REMIND_INTERVAL: Duration = Duration::from_secs(30 * 60);
+
+/// 发给通知卡片窗口的载荷。
+#[derive(Clone, serde::Serialize)]
+struct NotifyPopupPayload {
+    /// 通知 id：点击「查看订单」时原样回传，前端据此查路由
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<i32>,
+    title: String,
+    body: String,
+    /// 卡片图标类型：order / info / error
+    kind: String,
+    /// 有跳转目标时才显示「查看订单」按钮
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    /// 结构化订单信息（orderNo / customer / product / time / amount），
+    /// 由前端原样透传，卡片按这些字段渲染成多列表格。
+    /// 这里用 Value 而不定义结构体：字段由业务侧决定，壳只负责转发，
+    /// 以后加字段不用改 exe 再发一版。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<serde_json::Value>,
+}
+
+/// 计算卡片窗口位置：贴住主显示器工作区（work_area 已排除任务栏）的右下角。
+/// 窗口尺寸是逻辑像素，work_area 是物理像素，这里统一换算成逻辑像素。
+fn notify_popup_position(win: &WebviewWindow, height: f64) -> Option<(f64, f64)> {
+    let monitor = win.primary_monitor().ok().flatten()?;
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let area_x = area.position.x as f64 / scale;
+    let area_y = area.position.y as f64 / scale;
+    let area_w = area.size.width as f64 / scale;
+    let area_h = area.size.height as f64 / scale;
+    let x = area_x + area_w - NOTIFY_POPUP_WIDTH - NOTIFY_POPUP_MARGIN;
+    let y = area_y + area_h - height - NOTIFY_POPUP_MARGIN;
+    Some((x, y))
+}
+
+/// 取得（必要时创建）通知卡片窗口。窗口透明、无边框、置顶、不进任务栏、
+/// 且 `.focused(false)`——弹通知时不抢焦点，不打断用户正在做的事。
+fn ensure_notify_popup(app: &tauri::AppHandle) -> Option<WebviewWindow> {
+    if let Some(w) = app.get_webview_window(NOTIFY_POPUP_LABEL) {
+        return Some(w);
+    }
+    let builder = tauri::WebviewWindowBuilder::new(
+        app,
+        NOTIFY_POPUP_LABEL,
+        WebviewUrl::App("notify-popup.html".into()),
+    )
+    .title("通知")
+    .inner_size(NOTIFY_POPUP_WIDTH, 180.0)
+    .resizable(false)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .shadow(false)
+    .focused(false)
+    .visible(false);
+
+    // transparent() 在 macOS 上被 #[cfg(any(not(target_os = "macos"), feature = "macos-private-api"))]
+    // 门控（需要私有 API，仅 App Store 之外的分发可用），release 构建下未开该特性会直接编译失败。
+    // 这里只在非 macOS 开启透明；macOS 退化为不透明窗口，卡片功能不受影响。
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    match builder.build() {
+        Ok(w) => Some(w),
+        Err(e) => {
+            eprintln!("[notify-popup] 窗口创建失败: {e}");
+            None
+        }
+    }
+}
+
+/// 在屏幕右下角弹出一条自绘通知卡片。
+/// 卡片常驻、不自动消失，直到用户点「忽略」/「查看订单」/ ✕。
+fn show_notify_popup(
+    app: &tauri::AppHandle,
+    title: String,
+    body: String,
+    id: Option<i32>,
+    data: Option<serde_json::Value>,
+) -> Result<(), String> {
+    let win = ensure_notify_popup(app).ok_or_else(|| "通知窗口创建失败".to_string())?;
+
+    let payload = NotifyPopupPayload {
+        id,
+        title,
+        body,
+        kind: "order".into(),
+        path: Some("/orders".into()),
+        data,
+    };
+    win.emit("notify:show", payload).map_err(|e| e.to_string())?;
+
+    // 先按当前高度摆好位置再显示，避免在高处闪一下再跳
+    let h = win
+        .outer_size()
+        .map(|s| s.height as f64 / win.scale_factor().unwrap_or(1.0))
+        .unwrap_or(180.0);
+    if let Some((x, y)) = notify_popup_position(&win, h) {
+        let _ = win.set_position(LogicalPosition::new(x, y));
+    }
+    win.show().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 卡片内容高度变化 → 同步窗口尺寸并重新贴住右下角（底边固定不动）。
+#[tauri::command]
+fn notify_popup_resize(app: tauri::AppHandle, height: f64) {
+    let Some(win) = app.get_webview_window(NOTIFY_POPUP_LABEL) else {
+        return;
+    };
+    let h = height.clamp(60.0, 2000.0);
+    let _ = win.set_size(LogicalSize::new(NOTIFY_POPUP_WIDTH, h));
+    if let Some((x, y)) = notify_popup_position(&win, h) {
+        let _ = win.set_position(LogicalPosition::new(x, y));
+    }
+}
+
+/// 卡片全部关完 → 收起窗口（进程仍在托盘运行，主窗口不受影响）。
+#[tauri::command]
+fn notify_popup_hide(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window(NOTIFY_POPUP_LABEL) {
+        let _ = win.hide();
+    }
+}
+
+/// 卡片按钮点击：
+/// - view：唤起并聚焦主窗口，再让前端按 id 做路由跳转（复用现有链路）
+/// - 其它（忽略 / 关闭）：什么都不做，卡片由前端自己移除
+#[tauri::command]
+fn notify_popup_action(app: tauri::AppHandle, id: Option<i32>, action: String) {
+    if action != "view" {
+        eprintln!("[notify-popup] 忽略通知 id={id:?}");
+        return;
+    }
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+    let payload = NotificationAction {
+        id: id.map(|i| i as u32),
+    };
+    let _ = app.emit("notification:action", payload);
+}
+
+/// 由前端调用的自定义命令：在屏幕右下角弹出自绘通知卡片。
+/// 前端仍是原来的 `invoke('notify', {title, body, id})`，壳内部换实现即可。
 /// `id` 为可选的通知标识，前端用它回查「点击后跳转的路由」。
 #[tauri::command]
 fn notify(
@@ -23,12 +209,14 @@ fn notify(
     title: String,
     body: Option<String>,
     id: Option<i32>,
+    data: Option<serde_json::Value>,
 ) -> Result<(), String> {
     eprintln!(
-        "[notify] 收到前端通知请求 title={title:?} body={:?} id={id:?}",
-        body.as_deref().unwrap_or("")
+        "[notify] 收到前端通知请求 title={title:?} body={:?} id={id:?} data={:?}",
+        body.as_deref().unwrap_or(""),
+        data.as_ref().map(|v| v.to_string()).unwrap_or_default()
     );
-    send_notification(&app, title, body.unwrap_or_default(), id)
+    show_notify_popup(&app, title, body.unwrap_or_default(), id, data)
 }
 
 /// 通知点击动作事件载荷，前端据此恢复窗口并跳转路由。
@@ -102,6 +290,106 @@ fn open_local_folder(local_path: String) -> Result<String, String> {
     }
 }
 
+/// 由前端调用的自定义命令：用**系统默认程序**打开本地挂载盘（P:\）上的文件。
+///
+/// 与 `open_local_folder` 的分工：那个是用资源管理器「选中」文件（车间要拿它
+/// 去做本地编辑/另存），这个直接交给默认关联程序打开 —— 生产中心的预览按钮
+/// 要的就是「直接打开 PDF」，不用先弹资源管理器再双击一层。
+///
+/// `local_path` 期望是绝对路径，例如 `P:\Staff_Workspace\...\定稿.pdf`。
+///
+/// 返回值：
+///   - `Ok("opened")` 成功拉起默认程序
+///   - `Err(msg)` 路径非法 / 不存在（P:\ 未挂载）/ 启动失败（前端据此回退网页预览）
+#[tauri::command]
+fn open_local_file(local_path: String) -> Result<String, String> {
+    eprintln!("[open_local_file] 收到本地路径 local_path={local_path:?}");
+
+    // 1) 校验必须是绝对盘符路径（防把非法串拼进系统调用）
+    if !local_path.contains(':') || local_path.len() < 3 {
+        return Err(format!("非法本地路径: {local_path}"));
+    }
+
+    // 2) 校验路径存在 —— P:\ 未挂载或文件不在本地时立刻失败，前端据此回退网页预览
+    let path = std::path::Path::new(&local_path);
+    if !path.exists() {
+        eprintln!("[open_local_file] 路径不存在（可能挂载盘未就绪）: {local_path}");
+        return Err(format!(
+            "路径不存在（请确认本地挂载盘 P:\\ 已就绪）: {local_path}"
+        ));
+    }
+
+    // 3) 交给系统默认关联程序打开。
+    //
+    // Windows 上走 ShellExecuteW，不用 `cmd /C start`：后者把路径丢给 cmd 后立刻
+    // 返回，真正打开失败（系统没关联程序、文件被别家占用、ShellExecute 不认这个路径）
+    // 全被吞掉，前端拿到 Ok 就不回退网页预览 —— 员工看到的就是「点了没反应」。
+    // ShellExecuteW 直接返回结果码（> 32 才算成功），顺带绕开 cmd 的命令行解析与代码页。
+    #[cfg(target_os = "windows")]
+    let launched: Result<String, String> = {
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let to_wide = |s: &str| -> Vec<u16> {
+            s.encode_utf16().chain(std::iter::once(0)).collect()
+        };
+        let verb = to_wide("open");
+        let file = to_wide(&local_path);
+        // SAFETY: 两个字符串都是 NUL 结尾的 UTF-16；窗口句柄/参数/工作目录传 null。
+        let rc = unsafe {
+            ShellExecuteW(
+                None,
+                PCWSTR(verb.as_ptr()),
+                PCWSTR(file.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        // HINSTANCE <= 32 即失败，取值是 SE_ERR_* 错误码
+        let code = rc.0 as isize;
+        if code > 32 {
+            Ok("opened".to_string())
+        } else {
+            Err(match code {
+                0 | 8 => "系统内存不足".to_string(),
+                2 => "文件不存在".to_string(),
+                3 => "路径不存在".to_string(),
+                5 => "没有访问权限".to_string(),
+                26 => "文件被其他程序占用".to_string(),
+                27 | 31 => "系统里没有能打开这类文件的程序".to_string(),
+                28 | 29 | 30 => "系统关联程序无响应".to_string(),
+                32 => "系统组件缺失".to_string(),
+                other => format!("系统错误码 {other}"),
+            })
+        }
+    };
+    #[cfg(target_os = "macos")]
+    let launched: Result<String, String> = std::process::Command::new("open")
+        .arg(&local_path)
+        .spawn()
+        .map(|_| "opened".to_string())
+        .map_err(|e| format!("启动默认程序失败: {e}"));
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let launched: Result<String, String> = std::process::Command::new("xdg-open")
+        .arg(&local_path)
+        .spawn()
+        .map(|_| "opened".to_string())
+        .map_err(|e| format!("启动默认程序失败: {e}"));
+
+    match launched {
+        Ok(v) => {
+            eprintln!("[open_local_file] 已用默认程序打开: {local_path}");
+            Ok(v)
+        }
+        Err(e) => {
+            eprintln!("[open_local_file] 打开失败: {e} —— {local_path}");
+            Err(format!("{e}: {local_path}"))
+        }
+    }
+}
+
 /// 返回当前应用版本号（如 "0.3.1"），前端用于升级检查对比
 #[tauri::command]
 fn get_app_version(app: tauri::AppHandle) -> String {
@@ -111,8 +399,8 @@ fn get_app_version(app: tauri::AppHandle) -> String {
 /// 检查是否有新版本。
 /// `manual`：托盘手动触发时，无更新/失败会弹提示；启动自动与后台定时检测失败一律静默
 /// （可能临时没网，不打扰使用）。
-/// `periodic`：后台每 60 分钟定时检测——发现新版只发一次系统通知（用户点击才更新），
-///             同一版本在本次运行内提醒过就不再打扰。
+/// `periodic`：后台每 UPDATE_CHECK_INTERVAL 定时检测——发现新版发一条系统通知（用户点击才更新），
+///             同一版本隔 UPDATE_REMIND_INTERVAL 才会再提醒一次。
 async fn check_for_updates(app: tauri::AppHandle, manual: bool, periodic: bool) {
     eprintln!("[update] 检查更新 manual={manual} periodic={periodic}");
     let result = match app.updater() {
@@ -127,14 +415,14 @@ async fn check_for_updates(app: tauri::AppHandle, manual: bool, periodic: bool) 
                 update.current_version
             );
             if periodic {
-                // 后台定时：仅提醒一次，点击通知才开始下载更新
-                if update_remind_once(&version) {
+                // 后台定时：发通知提醒，点击通知才开始下载更新
+                if update_remind_due(&version) {
                     notify_update_available(app, update);
                 } else {
-                    eprintln!("[update] v{version} 已在本次运行提醒过，跳过");
+                    eprintln!("[update] v{version} 刚提醒过，跳过");
                 }
             } else {
-                update_remind_once(&version);
+                update_remind_due(&version);
                 prompt_update(app, update);
             }
         }
@@ -163,18 +451,50 @@ async fn check_for_updates(app: tauri::AppHandle, manual: bool, periodic: bool) 
     }
 }
 
-/// 同一版本在本次运行内只提醒一次的标记。返回 `true` 表示「本次还没提醒过」。
-fn update_remind_once(version: &str) -> bool {
-    static NOTIFIED: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+/// 现在是该给这个版本发提醒的时候吗？
+///
+/// `true` = 发（并记下时间）；同一版本要等 UPDATE_REMIND_INTERVAL 之后才再次放行，
+/// 换了新版本号立即放行。这样员工错过/划掉一条通知后，过一阵还能再看到一次。
+fn update_remind_due(version: &str) -> bool {
+    static NOTIFIED: OnceLock<Mutex<Option<(String, Instant)>>> = OnceLock::new();
     let mut guard = NOTIFIED
         .get_or_init(|| Mutex::new(None))
         .lock()
         .unwrap();
-    if guard.as_deref() == Some(version) {
+    let now = Instant::now();
+    let due = match guard.as_ref() {
+        Some((v, at)) => v != version || now.duration_since(*at) >= UPDATE_REMIND_INTERVAL,
+        None => true,
+    };
+    if due {
+        *guard = Some((version.to_string(), now));
+    }
+    due
+}
+
+/// 下载/安装是否已经有一个在跑（见 update_download_begin）。
+static DOWNLOADING: OnceLock<Mutex<bool>> = OnceLock::new();
+
+/// 标记「开始下载更新」。返回 false = 已经有一个在跑，调用方放弃本次触发。
+///
+/// 重提醒会把同一个版本的通知弹多条（见 update_remind_due），员工可能每条都点一下，
+/// 这里挡掉并发下载 —— 否则两个安装器会同时被拉起。
+fn update_download_begin() -> bool {
+    let mut running = DOWNLOADING.get_or_init(|| Mutex::new(false)).lock().unwrap();
+    if *running {
         false
     } else {
-        *guard = Some(version.to_string());
+        *running = true;
         true
+    }
+}
+
+/// 放掉上面的标记。下载失败时调用，好让员工再点一次通知重试。
+fn update_download_end() {
+    if let Some(running) = DOWNLOADING.get() {
+        if let Ok(mut running) = running.lock() {
+            *running = false;
+        }
     }
 }
 
@@ -249,6 +569,11 @@ fn prompt_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
 /// Windows：安装由 NSIS 被动模式接管（自带安装进度），装完自动重启；
 /// macOS/Linux：装完后自行拉起新版本再退出本进程。
 fn download_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
+    // 多条「发现新版本」通知被依次点到时，只放一个下载进来
+    if !update_download_begin() {
+        eprintln!("[update] 已有更新正在下载，忽略这次重复触发");
+        return;
+    }
     let version = update.version.clone();
     eprintln!("[update] 开始下载并安装 v{version} …");
 
@@ -338,6 +663,8 @@ fn download_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) 
                 std::process::exit(0);
             }
             Err(e) => {
+                // 放掉标记，员工还能再点一次通知重试（不然得重启壳）
+                update_download_end();
                 let msg = format!("下载/安装失败：{e}");
                 eprintln!("[update] {msg}");
                 let _ = emitter.emit(
@@ -359,12 +686,18 @@ fn download_update(app: tauri::AppHandle, update: tauri_plugin_updater::Update) 
     });
 }
 
-/// 发送系统通知。
+/// 发送【系统】通知（Windows toast）。
+///
+/// 目前 notify 命令已改为弹自绘卡片（见 show_notify_popup），本函数保留备用：
+/// 系统通知的优势是能进 Windows 通知中心，人不在电脑前时回来还能看到。
+/// 若以后想恢复「前台弹卡片 / 后台发系统通知」的双通道，直接重新调用它即可。
+///
 /// Linux / Windows：走 notify-rust 并阻塞等待点击动作，回调中直接恢复窗口 +
 /// emit notification:action 事件给前端做路由跳转。这样可以绕开
 /// tauri-plugin-notification 在 Linux 桌面端丢弃 NotificationHandle、
 /// 以及在 Windows 上 COM 激活注册可能失败导致 onAction 不触发的问题。
 /// macOS：走 tauri-plugin-notification（该平台行为稳定）。
+#[allow(dead_code)]
 fn send_notification(
     app: &tauri::AppHandle,
     title: String,
@@ -375,12 +708,16 @@ fn send_notification(
     {
         use notify_rust::Notification;
         let mut n = Notification::new();
-        n.summary(&title).body(&body).appname("pengmaitw");
+        // appname 必须与进程级 AUMID 一致：不一致时 Windows 找不到归属，
+        // 通知上的应用名与图标会掉成空白/默认值。
+        n.summary(&title).body(&body).appname(APP_ID);
         if let Some(id) = id {
             n.id(id as u32);
         }
-        // 注册默认动作，确保点击通知体或动作按钮都能触发 "default"
-        n.action("default", "打开");
+        // 两个按钮：查看订单 / 忽略。identifier 会在点击时回传，
+        // 由下方 wait_for_action 区分（ignore 只关通知、不跳转）。
+        n.action(ACTION_VIEW, "查看订单");
+        n.action(ACTION_IGNORE, "忽略");
         match n.show() {
             Ok(handle) => {
                 let app2 = app.clone();
@@ -389,8 +726,9 @@ fn send_notification(
                     eprintln!("[notify] 等待通知点击（wait_for_action）...");
                     handle.wait_for_action(move |action: &str| {
                         eprintln!("[notify] 收到点击动作 action={action:?}");
-                        // "__closed" 表示用户直接关闭（未点击），不恢复窗口
-                        if action != "__closed" {
+                        // "__closed" = 用户直接关掉通知；"ignore" = 点了「忽略」按钮。
+                        // 两者都只关通知：不恢复窗口、不跳转路由。
+                        if action != "__closed" && action != ACTION_IGNORE {
                             // 窗口操作必须在主线程执行（Windows 下跨线程
                             // ShowWindow/SetForegroundWindow 对隐藏窗口无效）
                             let app3 = app2.clone();
@@ -494,6 +832,38 @@ fn start_scan_listener(app: tauri::AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 前端把要保存的文件字节递过来：弹「另存为」对话框 → 写盘。
+///
+/// 为什么不让页面直接 `<a download>`：
+/// 主窗口装了 `.on_download(|_, _| true)`，而 wry 收到 true 之后会
+/// `args.SetHandled(true)` **接管**这次下载 —— 后果是 WebView2 自带的下载气泡
+/// 被完全抑制，保存路径沿用 WebView2 推出来的默认 ResultFilePath。
+/// 而页面里全站下载都是 `blob:` URL（既没有文件名也没有目录），推不出合法路径，
+/// 于是写盘失败且**零提示**。所以改由前端把字节交过来，这里给它一个正经的保存框。
+///
+/// 返回 `true` = 已保存；`false` = 用户在对话框里点了取消。
+/// ⚠️ 必须是 `async fn`。
+///
+/// Tauri 的**同步**命令跑在主线程上，而在主线程调用 `blocking_save_file()`
+/// 会和事件循环死锁 —— 插件文档明确写了不要在 main-thread context 用它，
+/// 它自己给的示例也是 `async fn`。写成同步 `fn` 的后果不是报错弹窗，
+/// 而是命令静默失败，被前端的 catch 兜住退回 `<a download>`，
+/// 文件静静落进默认下载夹、不弹任何保存框。
+#[tauri::command]
+async fn save_bytes(app: tauri::AppHandle, filename: String, contents: Vec<u8>) -> Result<bool, String> {
+    let Some(file_path) = app
+        .dialog()
+        .file()
+        .set_file_name(&filename)
+        .blocking_save_file()
+    else {
+        return Ok(false); // 用户取消
+    };
+    let path = file_path.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, contents).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
+    Ok(true)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -502,7 +872,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             notify,
             open_local_folder,
-            get_app_version
+            open_local_file,
+            get_app_version,
+            notify_popup_resize,
+            notify_popup_hide,
+            notify_popup_action,
+            save_bytes
         ])
         .on_window_event(|window, event| {
             // 拦截主窗口关闭：弹原生对话框，询问「后台挂起」或「退出程序」
@@ -537,14 +912,29 @@ pub fn run() {
             // tauri-plugin-notification 的 Windows COM 激活器将使用正确的 AUMID
             // 进行注册，确保 Toast 通知点击能正确回传到本进程。
 
-            // 启动时清理 WebView2 缓存，避免加载失败响应(404)被缓存导致白屏/404
-            // 必须在创建窗口(WebView)之前执行，否则缓存目录被占用删不掉
+            // 启动时清理 WebView2 的 HTTP 缓存，避免加载失败响应(404)被缓存导致白屏。
+            // 必须在创建窗口(WebView)之前执行，否则目录被占用删不掉。
+            //
+            // ⚠️ 只能删「纯缓存」子目录：EBWebView 整个目录里同时放着
+            // Default/Local Storage（登录态 auth_state 就存这里）、IndexedDB、
+            // Network/Cookies 等持久数据。以前是整个目录 remove_dir_all，
+            // 结果每次启动都把登录态一起清掉——登录页默认勾选的
+            // 「记住登录（30 天）」因此从未真正生效过，每次开机都要重新登录。
             if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
-                let cache_dir = std::path::Path::new(&appdata)
+                let webview_dir = std::path::Path::new(&appdata)
                     .join("com.dev.pengmaitw")
                     .join("EBWebView");
-                if cache_dir.exists() {
-                    let _ = std::fs::remove_dir_all(&cache_dir);
+                // 这些目录删掉只会让下次加载慢一点，不会丢任何用户数据
+                const CACHE_SUBDIRS: [&str; 3] = [
+                    "Default/Cache",
+                    "Default/Code Cache",
+                    "Default/GPUCache",
+                ];
+                for sub in CACHE_SUBDIRS {
+                    let dir = webview_dir.join(sub);
+                    if dir.exists() {
+                        let _ = std::fs::remove_dir_all(&dir);
+                    }
                 }
             }
 
@@ -565,6 +955,18 @@ pub fn run() {
             )
             .title(main_window_title.clone())
             .inner_size(1200.0, 800.0)
+            /*
+             * 禁掉 WebView2 的右键菜单。
+             *
+             * 壳里弹出来的是浏览器菜单（刷新 / 另存为 / 检查 / 打印…）—— 那是浏览器的东西，
+             * 出现在桌面程序里就像"没做完的网页"。注在所有文档最前面、capture 阶段拦掉，
+             * 免得页面上别处的监听先处理了；对远程页面（110.42.239.85:5000）同样生效。
+             *
+             * 只管主窗口。预览/工作单那些子窗口是看 PDF 的，右键的「打印 / 另存为」在那儿有用。
+             */
+            .initialization_script(
+                "document.addEventListener('contextmenu', function (e) { e.preventDefault(); }, { capture: true });",
+            )
             // 远程页面改 document.title 会试图覆盖标题，这里一律改回固定标题
             .on_document_title_changed({
                 let fixed = main_window_title.clone();
@@ -662,7 +1064,7 @@ pub fn run() {
 
             // 发布版更新检测：
             //   1) 启动约 8 秒后自动检查一次（有新版会弹确认框）
-            //   2) 之后每 60 分钟后台静默定时检测（有新版只发一次通知，点击才更新；失败不打扰）
+            //   2) 之后每 UPDATE_CHECK_INTERVAL 后台静默定时检测（有新版只发一次通知，点击才更新；失败不打扰）
             // debug 构建不做自动检查，需要时用托盘「检查更新…」手动触发。
             #[cfg(not(debug_assertions))]
             {
@@ -673,9 +1075,8 @@ pub fn run() {
                     tauri::async_runtime::spawn(async move {
                         check_for_updates(app_startup, false, false).await;
                     });
-                    // 60 分钟周期定时检测
                     loop {
-                        std::thread::sleep(Duration::from_secs(3600));
+                        std::thread::sleep(UPDATE_CHECK_INTERVAL);
                         let app_tick = app_handle.clone();
                         tauri::async_runtime::spawn(async move {
                             check_for_updates(app_tick, false, true).await;
@@ -683,6 +1084,11 @@ pub fn run() {
                     }
                 });
             }
+
+            // 预创建通知卡片窗口（隐藏状态）：等到第一次来通知才建的话，
+            // WebView 初始化会让卡片延迟几百毫秒才出现；提前建好，通知来时
+            // 直接 show() 就能秒出。
+            let _ = ensure_notify_popup(app.handle());
 
             Ok(())
         })

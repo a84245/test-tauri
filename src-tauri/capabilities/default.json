@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/remote-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "update_progress"],
+  "windows": ["main", "update_progress", "notify_popup"],
   "remote": {
     "urls": [
       "https://fanmai.synology.me:8007",
@@ -15,6 +15,11 @@
     "notification:default",
     "allow-notify",
     "allow-open-local-folder",
-    "allow-get-app-version"
+    "allow-open-local-file",
+    "allow-get-app-version",
+    "allow-notify-popup-resize",
+    "allow-notify-popup-hide",
+    "allow-notify-popup-action",
+    "allow-save-bytes"
   ]
 }
