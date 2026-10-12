@@ -241,6 +241,26 @@ struct UpdateProgress {
     message: Option<String>,
 }
 
+/// 本地路径打不开时，区分「挂载盘没挂」还是「文件确实不在本地」。
+///
+/// `Path::exists()` 会把权限、IO、网络错误统统吞成 `false` —— 于是「P: 没挂上」
+/// 「MinIO 抖了一下」「文件真的不在」三种情况长得一模一样，前端只能笼统地报
+/// 一句「P: 未就绪」。连盘根都读不到就只可能是没挂载；盘根在却找不到文件，
+/// 才是文件本身的问题。分清这两句，员工才知道该重启挂载还是该等同步。
+fn local_path_missing_reason(local_path: &str) -> String {
+    let path = std::path::Path::new(local_path);
+    // 祖先链的最后一项就是盘根（`P:\`）
+    let root = path.ancestors().last().unwrap_or(path);
+    if !root.exists() {
+        format!(
+            "挂载盘 {} 未就绪（盘没挂上，挂载服务可能停了）: {local_path}",
+            root.display()
+        )
+    } else {
+        format!("文件不在本地挂载盘上（可能还没同步到 P:\\）: {local_path}")
+    }
+}
+
 /// 由前端调用的自定义命令：在 Windows 资源管理器中打开本地挂载盘（P:\）的
 /// 对应文件夹并选中文件。配合员工端 rclone + WinFsp 挂载 MinIO 到 P:\ 使用。
 ///
@@ -260,11 +280,12 @@ fn open_local_folder(local_path: String) -> Result<String, String> {
         return Err(format!("非法本地路径: {local_path}"));
     }
 
-    // 2) 校验路径存在 —— 若 P:\ 未挂载或文件不存在，立刻失败给前端回退
+    // 2) 校验路径存在 —— 盘没挂和文件不在分开报，前端才能给员工对症的话
     let path = std::path::Path::new(&local_path);
     if !path.exists() {
-        eprintln!("[open_local_folder] 路径不存在（可能挂载盘未就绪）: {local_path}");
-        return Err(format!("路径不存在（请确认本地挂载盘 P:\\ 已启动）: {local_path}"));
+        let msg = local_path_missing_reason(&local_path);
+        eprintln!("[open_local_folder] {msg}");
+        return Err(msg);
     }
 
     // 3) 区分：文件 → /select 选中；目录 → 直接打开
@@ -310,13 +331,12 @@ fn open_local_file(local_path: String) -> Result<String, String> {
         return Err(format!("非法本地路径: {local_path}"));
     }
 
-    // 2) 校验路径存在 —— P:\ 未挂载或文件不在本地时立刻失败，前端据此回退网页预览
+    // 2) 校验路径存在 —— 盘没挂和文件不在分开报，前端才能给员工对症的话
     let path = std::path::Path::new(&local_path);
     if !path.exists() {
-        eprintln!("[open_local_file] 路径不存在（可能挂载盘未就绪）: {local_path}");
-        return Err(format!(
-            "路径不存在（请确认本地挂载盘 P:\\ 已就绪）: {local_path}"
-        ));
+        let msg = local_path_missing_reason(&local_path);
+        eprintln!("[open_local_file] {msg}");
+        return Err(msg);
     }
 
     // 3) 交给系统默认关联程序打开。
