@@ -976,6 +976,16 @@ pub fn run() {
             .title(main_window_title.clone())
             .inner_size(1200.0, 800.0)
             /*
+             * 关掉 Tauri 自己的拖放接管。
+             *
+             * Windows 上 WebView2 的 drag-drop handler 默认由 Tauri 注册，系统拖进来的文件
+             * 会被壳截走，网页侧根本收不到 HTML5 的 drop 事件 —— 表现就是「从资源管理器
+             * 拖文件进页面没反应」（客户批次单上传、文件区上传都中招）。官方注释写明：
+             * 要在前端用 HTML5 drag and drop，Windows 上必须禁用这个 handler。
+             * 页面内自己的拖拽（react-dnd 等）不受影响；壳也没有用到 onDragDropEvent。
+             */
+            .disable_drag_drop_handler()
+            /*
              * 禁掉 WebView2 的右键菜单。
              *
              * 壳里弹出来的是浏览器菜单（刷新 / 另存为 / 检查 / 打印…）—— 那是浏览器的东西，
