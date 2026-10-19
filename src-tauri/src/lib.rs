@@ -992,13 +992,16 @@ pub fn run() {
              * 禁掉 WebView2 的右键菜单。
              *
              * 壳里弹出来的是浏览器菜单（刷新 / 另存为 / 检查 / 打印…）—— 那是浏览器的东西，
-             * 出现在桌面程序里就像"没做完的网页"。注在所有文档最前面、capture 阶段拦掉，
-             * 免得页面上别处的监听先处理了；对远程页面（110.42.239.85:5000）同样生效。
+             * 出现在桌面程序里就像"没做完的网页"。对远程页面同样生效。
+             *
+             * 必须挂在 window 的冒泡阶段，不能挂 document 捕获：页面用 Radix 渲染自定义右键菜单，
+             * Radix 的事件处理器会检查 defaultPrevented，只要在它之前被 preventDefault 就整段跳过，
+             * 表现就是「右键没反应」。window 冒泡阶段晚于 React 的 document 处理器，两件事互不影响。
              *
              * 只管主窗口。预览/工作单那些子窗口是看 PDF 的，右键的「打印 / 另存为」在那儿有用。
              */
             .initialization_script(
-                "document.addEventListener('contextmenu', function (e) { e.preventDefault(); }, { capture: true });",
+                "window.addEventListener('contextmenu', function (e) { e.preventDefault(); }, false);",
             )
             // 远程页面改 document.title 会试图覆盖标题，这里一律改回固定标题
             .on_document_title_changed({
