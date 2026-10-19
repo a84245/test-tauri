@@ -975,6 +975,9 @@ pub fn run() {
             )
             .title(main_window_title.clone())
             .inner_size(1200.0, 800.0)
+            // 打开即最大化：员工电脑普遍 1080p/2K，1200×800 默认窗口太小，
+            // 每次都要手动点最大化。inner_size 仍保留，作为还原后的窗口大小。
+            .maximized(true)
             /*
              * 关掉 Tauri 自己的拖放接管。
              *
