@@ -13,6 +13,8 @@
   "permissions": [
     "core:default",
     "notification:default",
+    "dialog:allow-confirm",
+    "dialog:allow-message",
     "allow-notify",
     "allow-open-local-folder",
     "allow-open-local-file",
