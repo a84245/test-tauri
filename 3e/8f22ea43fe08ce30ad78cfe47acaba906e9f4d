@@ -1,0 +1,31 @@
+src-tauri/src/lib.rs
+  s_610857df35ea9c::t_88274150aa71fc 1132-1149
+  s_610857df35ea9c::t_df9ec5e297b798 145-147,152
+  s_610857df35ea9c::t_e9a45197f09281 179-188
+  s_610857df35ea9c::t_6b8b6bfd52f67e 153-157
+  s_610857df35ea9c::t_501a719c248b05 1114,1117
+  s_610857df35ea9c::t_83989c18e5a6ec 174-175
+src-tauri/capabilities/default.json
+  s_610857df35ea9c::t_c1cff4208df89b 31-35
+  s_610857df35ea9c::t_9b68605a7672d3 36
+src-tauri/Cargo.toml
+  s_610857df35ea9c::t_62287cec9c1374 3
+src-tauri/tauri.conf.json
+  s_610857df35ea9c::t_beb1b6c9b77826 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3e8f22ea43fe08ce30ad78cfe47acaba906e9f4d",
+  "prompts": {},
+  "sessions": {
+    "s_610857df35ea9c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f522edaa-fb3c-467c-b835-c0af2c01568f",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
