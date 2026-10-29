@@ -142,12 +142,19 @@ fn create_pet_window(app: &tauri::AppHandle, frontend_url: &str) -> Option<Webvi
     };
     let builder = tauri::WebviewWindowBuilder::new(app, "pet", WebviewUrl::External(parsed))
         .title("AI小麦")
-        .inner_size(260.0, 360.0)
+        // 尺寸跟页面里的 PET_SIZE 对齐；先隐藏，等前端首屏样式就绪后自己 show()，
+        // 避免 WebView 还没上样式时闪一下白底
+        .inner_size(190.0, 250.0)
         .resizable(false)
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .shadow(false);
+        .shadow(false)
+        .visible(false)
+        // 桌宠不是网页：右键别弹浏览器菜单（刷新/检查/另存为）
+        .initialization_script(
+            "window.addEventListener('contextmenu', function (e) { e.preventDefault(); }, false);",
+        );
 
     // 透明窗口在 macOS 需要私有 API 特性，其他平台直接开；跟通知卡片同一套处理
     #[cfg(not(target_os = "macos"))]
@@ -164,10 +171,20 @@ fn create_pet_window(app: &tauri::AppHandle, frontend_url: &str) -> Option<Webvi
     // 固定右下角（用逻辑坐标，适配高 DPI）
     if let Ok(Some(monitor)) = win.current_monitor() {
         let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
-        let x = size.width - 260.0 - 20.0;
-        let y = size.height - 360.0 - 48.0;
+        let x = size.width - 190.0 - 20.0;
+        let y = size.height - 250.0 - 48.0;
         let _ = win.set_position(tauri::LogicalPosition::new(x, y));
     }
+
+    // 兜底：页面正常会在首屏样式就绪后自己 show()；万一前端还是旧版 / 加载失败，
+    // 3 秒后也把窗口露出来，免得员工装完新版发现桌宠不见了。
+    let win_show = win.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(3));
+        if !win_show.is_visible().unwrap_or(true) {
+            let _ = win_show.show();
+        }
+    });
 
     Some(win)
 }
@@ -1094,9 +1111,10 @@ pub fn run() {
 
             // 系统托盘菜单：左键点击恢复主界面，右键弹出菜单
             let show_i = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>)?;
+            let pet_i = MenuItem::with_id(app, "pet", "显示/隐藏桌宠", true, None::<&str>)?;
             let update_i = MenuItem::with_id(app, "update", "检查更新…", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &update_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&show_i, &pet_i, &update_i, &quit_i])?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -1109,6 +1127,24 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.unminimize();
                             let _ = window.set_focus();
+                        }
+                    }
+                    "pet" => {
+                        // 桌宠被她自己关掉后，这里再叫出来；还在就切换显示/隐藏
+                        match app.get_webview_window("pet") {
+                            Some(w) => {
+                                if w.is_visible().unwrap_or(false) {
+                                    let _ = w.hide();
+                                } else {
+                                    let _ = w.show();
+                                    let _ = w.set_focus();
+                                }
+                            }
+                            None => {
+                                let url = std::env::var("PENGMAI_FRONTEND_URL")
+                                    .unwrap_or_else(|_| "https://fanmai.synology.me:8007".to_string());
+                                let _ = create_pet_window(app, &url);
+                            }
                         }
                     }
                     "update" => {
