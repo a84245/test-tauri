@@ -144,7 +144,7 @@ fn create_pet_window(app: &tauri::AppHandle, frontend_url: &str) -> Option<Webvi
         .title("AI小麦")
         // 尺寸跟页面里的 PET_SIZE 对齐；先隐藏，等前端首屏样式就绪后自己 show()，
         // 避免 WebView 还没上样式时闪一下白底
-        .inner_size(190.0, 250.0)
+        .inner_size(160.0, 200.0)
         .resizable(false)
         .decorations(false)
         .always_on_top(true)
@@ -171,8 +171,8 @@ fn create_pet_window(app: &tauri::AppHandle, frontend_url: &str) -> Option<Webvi
     // 固定右下角（用逻辑坐标，适配高 DPI）
     if let Ok(Some(monitor)) = win.current_monitor() {
         let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
-        let x = size.width - 190.0 - 20.0;
-        let y = size.height - 250.0 - 48.0;
+        let x = size.width - 160.0 - 20.0;
+        let y = size.height - 200.0 - 48.0;
         let _ = win.set_position(tauri::LogicalPosition::new(x, y));
     }
 
