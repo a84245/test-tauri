@@ -901,17 +901,36 @@ fn start_scan_listener(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         let mut buf = String::new();
         let mut last = Instant::now();
+        // 桌宠打字/点击反应：全局输入节流后推给前端（BongoCat 的核心玩法）
+        let mut last_pet = Instant::now() - Duration::from_secs(1);
 
         if let Err(e) = listen(move |event: Event| {
             match event.event_type {
                 EventType::KeyPress(Key::Return) => {
+                    let now = Instant::now();
+                    if now.duration_since(last_pet) >= Duration::from_millis(90) {
+                        last_pet = now;
+                        let _ = app.emit("pet:activity", "key");
+                    }
                     let code = buf.trim().to_string();
                     buf.clear();
                     if !code.is_empty() {
                         let _ = app.emit("scan:code", code);
                     }
                 }
+                EventType::ButtonPress(_) => {
+                    let now = Instant::now();
+                    if now.duration_since(last_pet) >= Duration::from_millis(90) {
+                        last_pet = now;
+                        let _ = app.emit("pet:activity", "click");
+                    }
+                }
                 EventType::KeyPress(_) => {
+                    let now = Instant::now();
+                    if now.duration_since(last_pet) >= Duration::from_millis(90) {
+                        last_pet = now;
+                        let _ = app.emit("pet:activity", "key");
+                    }
                     // event.name 是 OS 解释后的字符（尊重大小写/键盘布局），
                     // 只累积单个可打印字符（数字/字母/常用符号）。
                     if let Some(name) = event.name {
