@@ -53,9 +53,6 @@ jobs:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             os: windows
-          - platform: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            os: linux
           - platform: macos-latest
             target: aarch64-apple-darwin
             os: macos
@@ -74,12 +71,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
-      - name: Install Linux dependencies
-        if: matrix.os == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install Python (for MinIO upload)
         uses: actions/setup-python@v5
@@ -127,14 +118,12 @@ jobs:
           files: |
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.deb
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.sig
 
   # 汇总各平台片段 → latest.json → 上传 MinIO
   # if: always() —— 任一平台（常见是 macOS）挂掉时，manifest 仍要执行：
-  # 否则 latest.json 不更新，Windows/Linux 的包明明已经传上去了，
+  # 否则 latest.json 不更新，Windows/macOS 的包明明已经传上去了，
   # 所有客户端却一个都收不到更新（v0.3.6 / v0.3.7 连续踩过两次）。
   manifest:
     needs: build

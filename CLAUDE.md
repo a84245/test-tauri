@@ -123,4 +123,4 @@ git tag v0.3.1
 git push origin v0.3.1
 ```
 
-2. GitHub Actions builds Windows/Linux/macOS, attaches installers to the GitHub Release, and uploads `installer + .sig + latest.json` to MinIO. Installed clients detect and download the update from MinIO on next launch (or via tray「检查更新…」).
+2. GitHub Actions builds Windows/macOS, attaches installers to the GitHub Release, and uploads `installer + .sig + latest.json` to MinIO. Installed clients detect and download the update from MinIO on next launch (or via tray「检查更新…」).
