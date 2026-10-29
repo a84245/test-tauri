@@ -24,6 +24,7 @@
     "allow-notify-popup-hide",
     "allow-notify-popup-action",
     "allow-save-bytes",
+    "allow-save-to-desktop",
     "core:window:allow-start-dragging",
     "core:window:allow-set-size",
     "core:window:allow-set-position",

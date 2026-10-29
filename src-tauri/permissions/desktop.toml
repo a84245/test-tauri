@@ -1,0 +1,5 @@
+# 桌宠处理完文件后直接保存到桌面。
+[[permission]]
+identifier = "allow-save-to-desktop"
+description = "Enables the save_to_desktop command so the pet can drop processed files on the Desktop."
+commands.allow = ["save_to_desktop"]

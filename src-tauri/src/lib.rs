@@ -144,13 +144,15 @@ fn create_pet_window(app: &tauri::AppHandle, frontend_url: &str) -> Option<Webvi
         .title("AI小麦")
         // 尺寸跟页面里的 PET_SIZE 对齐；先隐藏，等前端首屏样式就绪后自己 show()，
         // 避免 WebView 还没上样式时闪一下白底
-        .inner_size(160.0, 200.0)
+        .inner_size(214.0, 160.0)
         .resizable(false)
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
         .shadow(false)
         .visible(false)
+        // 允许把文件从资源管理器拖到桌宠上（HTML5 drop）
+        .disable_drag_drop_handler()
         // 桌宠不是网页：右键别弹浏览器菜单（刷新/检查/另存为）
         .initialization_script(
             "window.addEventListener('contextmenu', function (e) { e.preventDefault(); }, false);",
@@ -171,8 +173,8 @@ fn create_pet_window(app: &tauri::AppHandle, frontend_url: &str) -> Option<Webvi
     // 固定右下角（用逻辑坐标，适配高 DPI）
     if let Ok(Some(monitor)) = win.current_monitor() {
         let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
-        let x = size.width - 160.0 - 20.0;
-        let y = size.height - 200.0 - 48.0;
+        let x = size.width - 214.0 - 20.0;
+        let y = size.height - 160.0 - 48.0;
         let _ = win.set_position(tauri::LogicalPosition::new(x, y));
     }
 
@@ -989,6 +991,24 @@ async fn save_bytes(app: tauri::AppHandle, filename: String, contents: Vec<u8>) 
     Ok(true)
 }
 
+/// 桌宠处理完文件后直接放到桌面（不弹保存框）。
+#[tauri::command]
+async fn save_to_desktop(
+    app: tauri::AppHandle,
+    filename: String,
+    contents: Vec<u8>,
+) -> Result<String, String> {
+    let dir = app.path().desktop_dir().map_err(|e| e.to_string())?;
+    let safe: String = filename
+        .chars()
+        .map(|c| if "\\/:*?\"<>|".contains(c) { '_' } else { c })
+        .collect();
+    let name = if safe.trim().is_empty() { "小麦文件.pdf".to_string() } else { safe };
+    let path = dir.join(name);
+    std::fs::write(&path, contents).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -1003,7 +1023,8 @@ pub fn run() {
             notify_popup_resize,
             notify_popup_hide,
             notify_popup_action,
-            save_bytes
+            save_bytes,
+            save_to_desktop
         ])
         .on_window_event(|window, event| {
             // 拦截主窗口关闭：弹原生对话框，询问「后台挂起」或「退出程序」
