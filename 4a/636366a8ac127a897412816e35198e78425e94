@@ -1,0 +1,27 @@
+src-tauri/capabilities/default.json
+  s_610857df35ea9c::t_0aa24ae3768517 23-29
+  s_610857df35ea9c::t_5fff725e4735be 5
+src-tauri/src/lib.rs
+  s_610857df35ea9c::t_85474ba58c8190 129-174
+  s_610857df35ea9c::t_5bd03cfdedefab 1139-1141
+src-tauri/Cargo.toml
+  s_610857df35ea9c::t_59ded2c4fe845b 3
+src-tauri/tauri.conf.json
+  s_610857df35ea9c::t_3cb636ac7428bb 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4a636366a8ac127a897412816e35198e78425e94",
+  "prompts": {},
+  "sessions": {
+    "s_610857df35ea9c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f522edaa-fb3c-467c-b835-c0af2c01568f",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "qiuchaoyun <qiuchaoyun@yaxon.com>"
+    }
+  }
+}
