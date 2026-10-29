@@ -1,0 +1,5 @@
+# 桌宠看鼠标：允许前端读取系统光标位置（屏幕物理坐标）。
+[[permission]]
+identifier = "allow-get-cursor-pos"
+description = "Enables the get_cursor_pos command so the desktop pet can look toward the mouse."
+commands.allow = ["get_cursor_pos"]

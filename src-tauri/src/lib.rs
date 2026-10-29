@@ -479,6 +479,29 @@ fn get_app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+/// 返回鼠标在屏幕上的物理坐标（Windows）。
+///
+/// 桌宠用它判断「鼠标离我近不近」：靠近就把眼睛和头转过去看鼠标，
+/// 走远了恢复正前方。网页自己只能在指针进入桌宠窗口时拿到坐标，
+/// 鼠标在窗口外的桌面上晃时是拿不到的，所以这个能力必须放在壳里。
+#[tauri::command]
+fn get_cursor_pos() -> Result<(f64, f64), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+        let mut point = POINT::default();
+        // SAFETY: point 是栈上有效内存，GetCursorPos 只往里写坐标。
+        unsafe { GetCursorPos(&mut point).map_err(|e| e.to_string())?; }
+        return Ok((point.x as f64, point.y as f64));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("get_cursor_pos 仅支持 Windows".to_string())
+    }
+}
+
 /// 检查是否有新版本。
 /// `manual`：托盘手动触发时，无更新/失败会弹提示；启动自动与后台定时检测失败一律静默
 /// （可能临时没网，不打扰使用）。
@@ -957,6 +980,7 @@ pub fn run() {
             open_local_folder,
             open_local_file,
             get_app_version,
+            get_cursor_pos,
             notify_popup_resize,
             notify_popup_hide,
             notify_popup_action,

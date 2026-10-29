@@ -19,6 +19,7 @@
     "allow-open-local-folder",
     "allow-open-local-file",
     "allow-get-app-version",
+    "allow-get-cursor-pos",
     "allow-notify-popup-resize",
     "allow-notify-popup-hide",
     "allow-notify-popup-action",
