@@ -126,6 +126,52 @@ fn ensure_notify_popup(app: &tauri::AppHandle) -> Option<WebviewWindow> {
     }
 }
 
+/// 桌宠窗口（AI小麦）：透明、无边框、置顶、不进任务栏，默认停在右下角。
+/// 页面 /pet 会按聊天/提醒状态自己调 setSize/setPosition，所以这里只给初始尺寸与位置。
+fn create_pet_window(app: &tauri::AppHandle, frontend_url: &str) -> Option<WebviewWindow> {
+    if let Some(w) = app.get_webview_window("pet") {
+        return Some(w);
+    }
+    let url = format!("{}/pet", frontend_url.trim_end_matches('/'));
+    let parsed = match url.parse() {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("[pet] 地址不合法 {url}: {e}");
+            return None;
+        }
+    };
+    let builder = tauri::WebviewWindowBuilder::new(app, "pet", WebviewUrl::External(parsed))
+        .title("AI小麦")
+        .inner_size(260.0, 360.0)
+        .resizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .shadow(false);
+
+    // 透明窗口在 macOS 需要私有 API 特性，其他平台直接开；跟通知卡片同一套处理
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    let win = match builder.build() {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("[pet] 桌宠窗口创建失败: {e}");
+            return None;
+        }
+    };
+
+    // 固定右下角（用逻辑坐标，适配高 DPI）
+    if let Ok(Some(monitor)) = win.current_monitor() {
+        let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+        let x = size.width - 260.0 - 20.0;
+        let y = size.height - 360.0 - 48.0;
+        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+    }
+
+    Some(win)
+}
+
 /// 在屏幕右下角弹出一条自绘通知卡片。
 /// 卡片常驻、不自动消失，直到用户点「忽略」/「查看订单」/ ✕。
 fn show_notify_popup(
@@ -1125,6 +1171,9 @@ pub fn run() {
             // WebView 初始化会让卡片延迟几百毫秒才出现；提前建好，通知来时
             // 直接 show() 就能秒出。
             let _ = ensure_notify_popup(app.handle());
+
+            // 桌宠（AI小麦）：独立透明置顶小窗，主窗口最小化也在；关掉它不影响主程序
+            let _ = create_pet_window(app.handle(), &frontend_url);
 
             Ok(())
         })
